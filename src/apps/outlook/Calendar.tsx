@@ -35,6 +35,7 @@ export interface CalEvent extends Rec {
   body?: string
   showAs?: string
   createdBy?: string
+  allDay?: boolean
 }
 
 const CAT: Record<string, [string, string]> = {
@@ -49,6 +50,15 @@ const CAT: Record<string, [string, string]> = {
 }
 
 const HOUR_H = 48
+
+/** all-day or multi-day events go in the banner row */
+const isBanner = (e: CalEvent) => !!e.allDay || +new Date(e.end) - +new Date(e.start) >= 20 * 3600000 || new Date(e.start).toDateString() !== new Date(new Date(e.end).getTime() - 1).toDateString()
+const covers = (e: CalEvent, d: Date) => {
+  const s = new Date(e.start)
+  s.setHours(0, 0, 0, 0)
+  const en = new Date(new Date(e.end).getTime() - 1)
+  return d >= s && d <= en
+}
 const START_H = 7
 const END_H = 20
 
@@ -76,6 +86,9 @@ interface Draft {
   location: string
   teams: boolean
   body: string
+  showAs?: string
+  allDay?: boolean
+  endDate?: string
 }
 
 function EventEditor({ draft, onChange, onClose }: { draft: Draft; onChange: (d: Draft) => void; onClose: () => void }) {
@@ -84,8 +97,13 @@ function EventEditor({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
     const [sh, sm] = draft.start.split(':').map(Number)
     const [eh, em] = draft.end.split(':').map(Number)
     const [y, mo, d] = draft.date.split('-').map(Number)
-    const start = new Date(y, mo - 1, d, sh, sm).toISOString()
-    const end = new Date(y, mo - 1, d, eh, em).toISOString()
+    let start = new Date(y, mo - 1, d, sh, sm).toISOString()
+    let end = new Date(y, mo - 1, d, eh, em).toISOString()
+    if (draft.allDay) {
+      const [y2, mo2, d2] = (draft.endDate || draft.date).split('-').map(Number)
+      start = new Date(y, mo - 1, d, 0, 0).toISOString()
+      end = new Date(y2, mo2 - 1, d2, 23, 59).toISOString()
+    }
     const id = uid('ev')
     db.insert('outlook.events', {
       id,
@@ -97,8 +115,9 @@ function EventEditor({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
       attendees: draft.attendees,
       teams: draft.teams,
       body: draft.body,
-      showAs: 'busy',
-      category: isAgent ? 'HWorker' : 'Blue',
+      showAs: draft.showAs ?? 'busy',
+      allDay: !!draft.allDay,
+      category: isAgent ? 'HWorker' : draft.showAs === 'oof' ? 'Purple' : 'Blue',
       createdBy: isAgent ? 'hworker' : undefined,
     })
     if (draft.attendees.length) {
@@ -132,7 +151,16 @@ function EventEditor({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
             <Delete20Regular /> Discard
           </button>
           <span className="w-px h-5 bg-[#E1DFDD] mx-1" />
-          <button className="flex items-center gap-1 h-8 px-2 rounded hover:bg-[#F0F0F0] text-[13px]"><Clock20Regular className="text-[#0F6CBD]" /> Busy <ChevronDown16Regular /></button>
+          <label className="flex items-center gap-1 h-8 px-2 rounded hover:bg-[#F0F0F0] text-[13px]">
+            <Clock20Regular className="text-[#0F6CBD]" />
+            <select data-agent="outlook-event-showas" aria-label="Show as" value={draft.showAs ?? 'busy'} onChange={(e) => onChange({ ...draft, showAs: e.target.value })} className="bg-transparent outline-none text-[13px]">
+              <option value="free">Free</option>
+              <option value="tentative">Tentative</option>
+              <option value="busy">Busy</option>
+              <option value="oof">Out of office</option>
+              <option value="elsewhere">Working elsewhere</option>
+            </select>
+          </label>
           <button className="flex items-center gap-1 h-8 px-2 rounded hover:bg-[#F0F0F0] text-[13px]">Reminder: 15 minutes <ChevronDown16Regular /></button>
           <div className="flex-1" />
           <button className="w-8 h-8 rounded hover:bg-[#F0F0F0] flex items-center justify-center" onClick={onClose}><Dismiss20Regular /></button>
@@ -155,14 +183,20 @@ function EventEditor({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
           <div className="flex items-center gap-3">
             <Clock20Regular className="text-[#616161]" />
             <input type="date" data-agent="outlook-event-date" aria-label="Date" value={draft.date} onChange={(e) => onChange({ ...draft, date: e.target.value })} className="h-8 px-2 rounded border border-[#D1D1D1] text-[13px]" />
-            <select data-agent="outlook-event-start" aria-label="Start time" value={draft.start} onChange={(e) => onChange({ ...draft, start: e.target.value })} className="h-8 px-2 rounded border border-[#D1D1D1] text-[13px] bg-white">
+            {!draft.allDay && <><select data-agent="outlook-event-start" aria-label="Start time" value={draft.start} onChange={(e) => onChange({ ...draft, start: e.target.value })} className="h-8 px-2 rounded border border-[#D1D1D1] text-[13px] bg-white">
               {TIME_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             <span className="text-[13px] text-[#616161]">to</span>
             <select data-agent="outlook-event-end" aria-label="End time" value={draft.end} onChange={(e) => onChange({ ...draft, end: e.target.value })} className="h-8 px-2 rounded border border-[#D1D1D1] text-[13px] bg-white">
               {TIME_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <label className="flex items-center gap-2 text-[13px] ml-2"><input type="checkbox" className="accent-[#0F6CBD]" /> All day</label>
+            </select></>}
+            <label className="flex items-center gap-2 text-[13px] ml-2"><input type="checkbox" data-agent="outlook-event-allday" aria-label="All day" checked={!!draft.allDay} onChange={(e) => onChange({ ...draft, allDay: e.target.checked, endDate: draft.endDate || draft.date })} className="accent-[#0F6CBD]" /> All day</label>
+            {draft.allDay && (
+              <>
+                <span className="text-[13px] text-[#616161]">until</span>
+                <input type="date" data-agent="outlook-event-end-date" aria-label="End date" value={draft.endDate || draft.date} onChange={(e) => onChange({ ...draft, endDate: e.target.value })} className="h-8 px-2 rounded border border-[#D1D1D1] text-[13px]" />
+              </>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <img src={logoUrl('teams')} className="w-5 h-5" alt="" />
@@ -384,6 +418,25 @@ export function CalendarView({ params, nonce }: { params: any; nonce: number }) 
                   )
                 })}
               </div>
+              {events.some((e) => isBanner(e) && days.some((d) => covers(e, d))) && (
+                <div className="flex shrink-0 border-b border-[#EDEBE9] min-h-[28px]" style={{ paddingLeft: 56 }}>
+                  {days.map((d) => (
+                    <div key={d.toISOString()} className="flex-1 min-w-0 border-l border-[#EDEBE9] p-0.5 space-y-0.5">
+                      {events
+                        .filter((e) => isBanner(e) && covers(e, d))
+                        .map((e) => {
+                          const [bg, fg] = e.showAs === 'oof' ? ['#EFE0F7', '#8764B8'] : (CAT[e.category ?? 'Blue'] ?? CAT.Blue)
+                          return (
+                            <button key={e.id} data-agent={`outlook-event-${e.id}`} onClick={() => setOpenEv(e)} className="w-full h-6 px-1.5 rounded text-left text-[12px] font-semibold truncate flex items-center gap-1" style={{ background: bg, borderLeft: `3px solid ${fg}`, backgroundImage: e.showAs === 'oof' ? 'repeating-linear-gradient(135deg, transparent 0 6px, rgba(135,100,184,0.12) 6px 12px)' : undefined }}>
+                              {e.createdBy === 'hworker' && <img src={logoUrl('hworker')} className="w-3 h-3 rounded-sm" alt="" />}
+                              <span className="truncate">{e.title}</span>
+                            </button>
+                          )
+                        })}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex-1 overflow-auto" ref={(el) => { if (el && !el.dataset.init) { el.dataset.init = '1'; el.scrollTop = HOUR_H * 1.5 } }}>
                 <div className="relative flex" style={{ height: (END_H - START_H) * HOUR_H }}>
                   <div className="w-14 shrink-0">
@@ -394,7 +447,7 @@ export function CalendarView({ params, nonce }: { params: any; nonce: number }) 
                     ))}
                   </div>
                   {days.map((d) => {
-                    const dayEvents = events.filter((e) => new Date(e.start).toDateString() === d.toDateString())
+                    const dayEvents = events.filter((e) => !isBanner(e) && new Date(e.start).toDateString() === d.toDateString())
                     const isToday = d.toDateString() === now.toDateString()
                     return (
                       <div
@@ -469,7 +522,7 @@ function MonthGrid({ anchor, events, onOpen }: { anchor: Date; events: CalEvent[
         <div key={d.toISOString()} className="border-b border-l border-[#EDEBE9] p-1 overflow-hidden">
           <div className={`text-[12px] mb-0.5 ${d.toDateString() === new Date().toDateString() ? 'text-[#0F6CBD] font-semibold' : d.getMonth() !== anchor.getMonth() ? 'text-[#A19F9D]' : ''}`}>{d.getDate()}</div>
           {events
-            .filter((e) => new Date(e.start).toDateString() === d.toDateString())
+            .filter((e) => (isBanner(e) ? covers(e, d) : new Date(e.start).toDateString() === d.toDateString()))
             .slice(0, 3)
             .map((e) => (
               <button key={e.id} onClick={() => onOpen(e)} className="w-full text-left text-[11px] truncate px-1 rounded mb-0.5" style={{ background: (CAT[e.category ?? 'Blue'] ?? CAT.Blue)[0] }}>
