@@ -57,7 +57,7 @@ export function Taskbar() {
   const now = useClock()
   const trayOpen = useSystem((s) => s.trayOpen)
   const setTrayOpen = (fn: (o: boolean) => boolean) => setTray(fn(trayOpen))
-  const runningAgents = useRuns((s) => Object.values(s.runs).filter((r) => r.status === 'running' || r.status === 'paused').length)
+  const runningAgents = useRuns((s) => Object.values(s.runs).filter((r) => r.status === 'running' || r.status === 'paused' || r.status === 'awaiting').length)
   if (!desk) return null
   const pinned = APPS.filter((a) => a.pinned && !(isAgent && a.id === 'hworker'))
   const openIds = Array.from(new Set(desk.windows.map((w) => w.appId)))

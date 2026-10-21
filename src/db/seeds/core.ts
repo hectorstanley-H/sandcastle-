@@ -371,6 +371,7 @@ export function seed(): Collections {
     'outlook.events': events,
     files,
     'hworker.runs': runs,
+    'hworker.settings': [{ id: 'prefs', confirmExternal: false }],
     people: PEOPLE as any,
   }
 }

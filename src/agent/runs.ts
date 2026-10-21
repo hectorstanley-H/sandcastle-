@@ -2,7 +2,7 @@
 import { create } from 'zustand'
 import type { WorkflowResult } from './types'
 
-export type RunStatus = 'booting' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled'
+export type RunStatus = 'booting' | 'running' | 'paused' | 'awaiting' | 'done' | 'failed' | 'cancelled'
 
 export interface LogEntry {
   id: number
@@ -31,6 +31,8 @@ export interface Run {
   endedAt?: number
   result?: WorkflowResult
   error?: string
+  /** pending human approval */
+  approval?: { question: string; detail?: string; answer?: boolean }
 }
 
 interface RunsState {
@@ -64,7 +66,7 @@ export const cancelFlags = new Set<string>()
 export function cancelRun(id: string) {
   cancelFlags.add(id)
   const r = useRuns.getState().runs[id]
-  if (r && (r.status === 'running' || r.status === 'paused' || r.status === 'booting')) {
+  if (r && (r.status === 'running' || r.status === 'paused' || r.status === 'booting' || r.status === 'awaiting')) {
     useRuns.getState().patch(id, { status: 'cancelled', endedAt: Date.now() })
   }
 }

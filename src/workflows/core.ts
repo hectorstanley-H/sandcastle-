@@ -62,6 +62,7 @@ export const workflows: Workflow[] = [
       )
 
       a.step(3)
+      await a.approve('Send this reply to Elena Rossi (adatum.com — external)?', 'To: Elena Rossi <elena.rossi@adatum.com>\nCc: Liam O’Connor\nSubject: RE: Follow-up from today’s call — pricing & rollout timeline')
       await a.click('@outlook-send', { label: 'Send' })
       await a.wait(900)
       const id = newestEmail((e) => e.folder === 'sent' && e.replyTo === 'em-elena-followup')

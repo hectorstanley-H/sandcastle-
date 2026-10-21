@@ -114,6 +114,7 @@ function StatusPill({ status }: { status: Run['status'] }) {
     booting: ['Starting', '#F1ECF9', '#430693'],
     running: ['Working', '#F1ECF9', '#430693'],
     paused: ['Paused — you have control', '#FFF4CE', '#8A5A00'],
+    awaiting: ['Waiting for approval', '#FFF4CE', '#8A5A00'],
     done: ['Completed', '#DFF6DD', '#0E700E'],
     failed: ['Needs attention', '#FDE7E9', '#A4262C'],
     cancelled: ['Stopped', '#EDEBE9', '#605E5C'],
@@ -225,7 +226,7 @@ export default function AgentWindow({ params }: AppProps) {
 
   const pct = run.status === 'done' ? 100 : Math.round((Math.max(0, run.planIndex) / Math.max(1, run.plan.length)) * 100)
   const activeApp = run.activeApp ? getApp(run.activeApp) : undefined
-  const live = run.status === 'running' || run.status === 'paused' || run.status === 'booting'
+  const live = run.status === 'running' || run.status === 'paused' || run.status === 'booting' || run.status === 'awaiting'
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-white text-[#0F0E12]" style={{ fontFamily: 'var(--font-brand)' }}>
@@ -316,6 +317,17 @@ export default function AgentWindow({ params }: AppProps) {
             <span className="text-[10.5px] text-[#7A7A87]" style={{ fontFamily: 'var(--font-mono)' }}>{run.log.filter((l) => l.kind === 'action' || l.kind === 'open').length} ACTIONS</span>
           </div>
           <Feed run={run} />
+          {run.status === 'awaiting' && run.approval && (
+            <div className="m-3 mt-0 p-4 rounded-xl border-2 border-[#430693] bg-[#FBF9FE] result-in" data-agent="agent-approval">
+              <div className="flex items-center gap-2 text-[13px] font-bold"><ShieldCheck size={16} weight="fill" className="text-[#430693]" /> Approval needed</div>
+              <div className="mt-1.5 text-[12.5px] text-[#0F0E12] leading-snug">{run.approval.question}</div>
+              {run.approval.detail && <div className="mt-2 p-2.5 rounded-lg bg-white border border-[#EAE5DD] text-[11.5px] text-[#3A3A44] whitespace-pre-wrap max-h-32 overflow-auto">{run.approval.detail}</div>}
+              <div className="mt-3 flex gap-2">
+                <button onClick={() => useRuns.getState().patch(run.id, (r) => ({ approval: { ...r.approval!, answer: true } }))} className="flex-1 h-9 rounded-lg bg-[#0F0E12] text-white text-[12.5px] font-semibold hover:bg-[#2A2930]">Approve</button>
+                <button onClick={() => useRuns.getState().patch(run.id, (r) => ({ approval: { ...r.approval!, answer: false } }))} className="flex-1 h-9 rounded-lg border border-[#E1DDD6] text-[12.5px] font-semibold hover:bg-white">Reject</button>
+              </div>
+            </div>
+          )}
           {run.status === 'done' && run.result && (
             <div className="m-3 mt-0 p-4 rounded-xl bg-[#F1EEE9] border-l-2 border-[#430693] result-in">
               <div className="flex items-center gap-2 text-[13px] font-bold">

@@ -110,6 +110,11 @@ export interface AgentAPI {
   query(target: Target): HTMLElement[]
   text(target: Target): string
   wait(ms: number): Promise<void>
+  /**
+   * Human-in-the-loop checkpoint. If the user enabled "Ask before sending external email" (H-Worker settings),
+   * the agent pauses and shows an Approve / Reject card; resolves true when approved. No-op (true) otherwise.
+   */
+  approve(question: string, detail?: string): Promise<boolean>
   /** close the app window via its ✕ button */
   close(appId: string): Promise<void>
   /** direct data access when UI-driving isn't practical (use sparingly) */

@@ -12,7 +12,7 @@ import { AppStack, HMark, Mono } from './shared'
 /** Quick-deploy panel that opens from the H-Worker icon in the system tray. */
 export function TrayFlyout({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('')
-  const live = useRuns(useShallow((s) => Object.values(s.runs).filter((r) => ['running', 'paused', 'booting'].includes(r.status))))
+  const live = useRuns(useShallow((s) => Object.values(s.runs).filter((r) => ['running', 'paused', 'booting', 'awaiting'].includes(r.status))))
   const quick = WORKFLOWS.filter((w) => w.featured).slice(0, 6)
   const matches = q.trim().length > 2 ? matchWorkflows(q).slice(0, 4).map((m) => m.wf) : []
   const deploy = (id: string, prompt?: string) => {

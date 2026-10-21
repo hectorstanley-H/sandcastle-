@@ -342,6 +342,26 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     query: (target) => resolve(root(), target),
     text: (target) => (resolve(root(), target)[0]?.textContent ?? '').trim(),
     wait: (ms) => delay(ms),
+    async approve(question, detail) {
+      await gate()
+      const prefs = db.find<any>('hworker.settings', 'prefs')
+      if (!prefs?.confirmExternal) return true
+      runs().patch(runId, { status: 'awaiting', approval: { question, detail } })
+      runs().addLog(runId, { kind: 'warn', text: `Waiting for your approval: ${question}` })
+      hwlog('awaiting', question)
+      wm().toast('main', { appId: 'hworker', title: `${run().name} needs your approval`, body: question, action: { label: 'Review', appId: 'agent', params: { runId } } })
+      for (;;) {
+        if (cancelFlags.has(runId)) throw new Cancelled()
+        const a = run()?.approval
+        if (a && a.answer !== undefined) {
+          runs().patch(runId, { status: 'running', approval: undefined })
+          runs().addLog(runId, { kind: a.answer ? 'success' : 'warn', text: a.answer ? 'Approved by Alex Morgan' : 'Rejected by Alex Morgan' })
+          if (!a.answer) throw new Cancelled()
+          return true
+        }
+        await sleep(150)
+      }
+    },
     async close(appId) {
       const el = resolve(root(), `@close-${appId}`)[0]
       if (el) {

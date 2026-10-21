@@ -28,7 +28,7 @@ import type { AppProps } from '@/os/registry'
 import { APPS, appIcon, getApp } from '@/os/registry'
 import { WindowControls } from '@/os/Window'
 import { useDesk } from '@/os/context'
-import { useCollection } from '@/db/db'
+import { db, useCollection } from '@/db/db'
 import { ME, COMPANY } from '@/data/people'
 import { relative } from '@/data/time'
 import { WORKFLOWS, getWorkflow, matchWorkflows } from '@/workflows'
@@ -276,7 +276,7 @@ function Home({ onPick, focusPrompt, go }: { onPick: (wf: Workflow, prompt?: str
   const nudges = WORKFLOWS.map((wf) => ({ wf, text: wf.nudge?.() })).filter((n) => n.text).slice(0, 4)
   const featured = WORKFLOWS.filter((w) => w.featured).slice(0, 6)
   const done = all.filter((r) => r.status === 'done')
-  const active = all.filter((r) => ['running', 'paused', 'booting'].includes(r.status))
+  const active = all.filter((r) => ['running', 'paused', 'booting', 'awaiting'].includes(r.status))
   const minutes = done.reduce((s, r) => s + (parseInt(getWorkflow(r.workflowId)?.timeSaved ?? '20') || 20), 0)
   return (
     <div className="max-w-[920px] mx-auto px-10 pt-12 pb-16">
@@ -405,7 +405,7 @@ function WorkflowsView({ onPick }: { onPick: (wf: Workflow) => void }) {
 
 function AgentsView({ go }: { go: (v: View, runId?: string) => void }) {
   const all = useAllRuns()
-  const live = all.filter((r) => ['running', 'paused', 'booting'].includes(r.status))
+  const live = all.filter((r) => ['running', 'paused', 'booting', 'awaiting'].includes(r.status))
   return (
     <div className="max-w-[1040px] mx-auto px-10 pt-10 pb-16">
       <div className="flex items-end justify-between">
@@ -538,7 +538,7 @@ function ActivityView({ selectedId, setSelected }: { selectedId?: string; setSel
               </div>
             )}
             <div className="mt-5 flex gap-2">
-              {['running', 'paused', 'booting'].includes(sel.status) ? (
+              {['running', 'paused', 'booting', 'awaiting'].includes(sel.status) ? (
                 <button onClick={() => openAgentWindow(sel.id)} className="h-9 px-4 rounded-full bg-[#0F0E12] text-white text-[12.5px] font-semibold flex items-center gap-1.5"><Eye size={14} /> Watch live</button>
               ) : (
                 <button onClick={() => startRun(sel.workflowId, sel.inputs ?? {}, { prompt: sel.prompt })} className="h-9 px-4 rounded-full border border-[#E1DDD6] text-[12.5px] font-semibold flex items-center gap-1.5 hover:bg-[#F7F5F1]"><ArrowCounterClockwise size={14} /> Run again</button>
@@ -572,6 +572,7 @@ function StatusBadge({ status }: { status: string }) {
     running: ['Running', '#F1ECF9', '#430693'],
     booting: ['Starting', '#F1ECF9', '#430693'],
     paused: ['Paused', '#FFF4CE', '#8A5A00'],
+    awaiting: ['Needs approval', '#FFF4CE', '#8A5A00'],
   }
   const [l, bg, fg] = m[status] ?? ['—', '#F3F2F1', '#605E5C']
   return <span className="inline-flex w-fit items-center h-6 px-2.5 rounded-full text-[11.5px] font-semibold" style={{ background: bg, color: fg }}>{l}</span>
@@ -606,7 +607,12 @@ function IntegrationsView() {
 }
 
 function SettingsView() {
-  const [opts, setOpts] = useState({ confirmSend: false, notify: true, record: true })
+  const prefs = useCollection<any>('hworker.settings').find((p) => p.id === 'prefs') ?? { id: 'prefs' }
+  const [opts, setLocal] = useState({ confirmSend: !!prefs.confirmExternal, notify: true, record: true })
+  const setOpts = (o: typeof opts) => {
+    setLocal(o)
+    db.upsert('hworker.settings', { ...prefs, id: 'prefs', confirmExternal: o.confirmSend })
+  }
   const Toggle = ({ k, label, desc }: { k: keyof typeof opts; label: string; desc: string }) => (
     <div className="flex items-center gap-4 py-4 border-t border-[#F1EEE9]">
       <div className="flex-1">
@@ -650,7 +656,7 @@ export default function HWorker({ win, params }: AppProps) {
   const [sheet, setSheet] = useState<{ wf: Workflow; prompt?: string } | null>(null)
   const [selRun, setSelRun] = useState<string | undefined>()
   const [focusPrompt, setFocusPrompt] = useState(false)
-  const liveCount = useRuns((s) => Object.values(s.runs).filter((r) => ['running', 'paused', 'booting'].includes(r.status)).length)
+  const liveCount = useRuns((s) => Object.values(s.runs).filter((r) => ['running', 'paused', 'booting', 'awaiting'].includes(r.status)).length)
 
   useEffect(() => {
     if (params?.view) setView(params.view)

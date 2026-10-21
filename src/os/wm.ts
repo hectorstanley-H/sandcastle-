@@ -89,7 +89,11 @@ export const useWM = create<WMState>()((set, get) => {
     open: (desk, appId, params, opts) => {
       const d = get().desks[desk] ?? newDesk()
       const app = getApp(appId)
-      const existing = app?.multi ? undefined : d.windows.find((w) => w.appId === appId)
+      const existing = app?.multi
+        ? params?.runId
+          ? d.windows.find((w) => w.appId === appId && w.params?.runId === params.runId)
+          : undefined
+        : d.windows.find((w) => w.appId === appId)
       const z = d.zTop + 1
       if (existing) {
         mut(desk, (dd) => ({
