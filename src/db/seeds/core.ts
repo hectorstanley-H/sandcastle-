@@ -214,7 +214,7 @@ export function seed(): Collections {
       body: `Hi Alex,\n\nAttached is the FY26 budget template. Could you fill in the Operations tab by next Wednesday? Headcount assumptions are pre-filled from Workday.\n\nThanks,\nSofia`,
       date: daysAgo(1, 15, 12),
       read: true,
-      attachments: [{ name: 'FY26_Budget_Template.xlsx', size: '1.2 MB', kind: 'xlsx', open: { appId: 'excel' } }],
+      attachments: [{ name: 'FY26_Budget_Template.xlsx', size: '1.2 MB', kind: 'xlsx', open: { appId: 'excel', params: { workbookId: 'wb-fy26-budget' } } }],
     },
     {
       id: 'em-ben-update',
@@ -225,7 +225,7 @@ export function seed(): Collections {
       body: `Hi Alex,\n\nSeptember SLA numbers are in: 97.2% on-time (target 96%), 3 escalations, all resolved. Full report attached.\n\nBen`,
       date: daysAgo(2, 16, 40),
       read: true,
-      attachments: [{ name: 'Warehouse_SLA_Sep.xlsx', size: '342 KB', kind: 'xlsx', open: { appId: 'excel' } }],
+      attachments: [{ name: 'Warehouse_SLA_Sep.xlsx', size: '342 KB', kind: 'xlsx', open: { appId: 'excel', params: { workbookId: 'wb-warehouse-sla' } } }],
     },
     {
       id: 'em-linkedin',
@@ -322,18 +322,18 @@ export function seed(): Collections {
   ]
 
   const files = [
-    { id: 'f-1', name: 'Q3 Operations Review.pptx', folder: 'Documents', kind: 'pptx', size: '4.8 MB', modified: hoursAgo(2), open: { appId: 'powerpoint' } },
-    { id: 'f-2', name: 'Vendor Spend FY25.xlsx', folder: 'Documents', kind: 'xlsx', size: '612 KB', modified: daysAgo(1, 16, 12), open: { appId: 'excel' } },
-    { id: 'f-3', name: 'Onboarding Checklist.docx', folder: 'Documents', kind: 'docx', size: '88 KB', modified: daysAgo(1, 10, 3), open: { appId: 'word' } },
+    { id: 'f-1', name: 'Q3 Operations Review.pptx', folder: 'Documents', kind: 'pptx', size: '4.8 MB', modified: hoursAgo(2), open: { appId: 'powerpoint', params: { deckId: 'deck-q3-ops' } } },
+    { id: 'f-2', name: 'Vendor Spend FY25.xlsx', folder: 'Documents', kind: 'xlsx', size: '612 KB', modified: daysAgo(1, 16, 12), open: { appId: 'excel', params: { workbookId: 'wb-vendor-spend' } } },
+    { id: 'f-3', name: 'Onboarding Checklist.docx', folder: 'Documents', kind: 'docx', size: '88 KB', modified: daysAgo(1, 10, 3), open: { appId: 'word', params: { docId: 'doc-onboarding' } } },
     { id: 'f-4', name: 'Contoso MSA - Redline.pdf', folder: 'Documents', kind: 'pdf', size: '1.1 MB', modified: daysAgo(3, 15, 40), open: { appId: 'acrobat', params: { doc: 'contoso-msa' } } },
     { id: 'f-5', name: 'Travel Policy 2025.pdf', folder: 'Documents', kind: 'pdf', size: '420 KB', modified: daysAgo(9, 9, 0), open: { appId: 'acrobat', params: { doc: 'travel-policy' } } },
     { id: 'f-6', name: 'Uber_Receipt_Oct.pdf', folder: 'Downloads', kind: 'pdf', size: '84 KB', modified: daysAgo(2, 19, 25), open: { appId: 'acrobat', params: { doc: 'rcpt-uber' } } },
     { id: 'f-7', name: 'INV-20931.pdf', folder: 'Downloads', kind: 'pdf', size: '128 KB', modified: hoursAgo(3), open: { appId: 'acrobat', params: { doc: 'inv-fabrikam' } } },
-    { id: 'f-8', name: 'Warehouse_SLA_Sep.xlsx', folder: 'Downloads', kind: 'xlsx', size: '342 KB', modified: daysAgo(2, 16, 45), open: { appId: 'excel' } },
+    { id: 'f-8', name: 'Warehouse_SLA_Sep.xlsx', folder: 'Downloads', kind: 'xlsx', size: '342 KB', modified: daysAgo(2, 16, 45), open: { appId: 'excel', params: { workbookId: 'wb-warehouse-sla' } } },
     { id: 'f-9', name: 'Team offsite photos.zip', folder: 'Downloads', kind: 'zip', size: '86.2 MB', modified: daysAgo(12, 18, 0) },
     { id: 'f-10', name: 'Headshot.jpg', folder: 'Pictures', kind: 'img', size: '2.3 MB', modified: daysAgo(40, 12, 0) },
-    { id: 'f-11', name: 'Q4 Staffing Plan.xlsx', folder: 'Documents', kind: 'xlsx', size: '204 KB', modified: daysAgo(1, 11, 15), open: { appId: 'excel' } },
-    { id: 'f-12', name: 'Ops Runbook v3.docx', folder: 'Documents', kind: 'docx', size: '1.6 MB', modified: daysAgo(14, 9, 0), open: { appId: 'word' } },
+    { id: 'f-11', name: 'Q4 Staffing Plan.xlsx', folder: 'Documents', kind: 'xlsx', size: '204 KB', modified: daysAgo(1, 11, 15), open: { appId: 'excel', params: { workbookId: 'wb-staffing' } } },
+    { id: 'f-12', name: 'Ops Runbook v3.docx', folder: 'Documents', kind: 'docx', size: '1.6 MB', modified: daysAgo(14, 9, 0), open: { appId: 'word', params: { docId: 'doc-runbook' } } },
   ]
 
   // a couple of finished runs so the H-Worker activity view isn't empty

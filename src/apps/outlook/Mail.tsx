@@ -213,7 +213,8 @@ function Compose({ state, onChange, onClose }: { state: ComposeState; onChange: 
           {attachMenu && (
             <div className="absolute z-50 left-0 top-9 w-[320px] bg-white rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.18)] border border-black/5 py-1">
               <div className="px-3 py-1.5 text-[11.5px] font-semibold text-[#616161]">Suggested files</div>
-              {files.slice(0, 10).map((f: any) => (
+              <div className="max-h-[320px] overflow-auto">
+              {[...files].sort((x: any, y: any) => +new Date(y.modified ?? 0) - +new Date(x.modified ?? 0)).slice(0, 40).map((f: any) => (
                 <button
                   key={f.id}
                   data-agent={`outlook-attach-file-${f.id}`}
@@ -230,6 +231,7 @@ function Compose({ state, onChange, onClose }: { state: ComposeState; onChange: 
                   </div>
                 </button>
               ))}
+              </div>
               <div className="h-px bg-[#EDEBE9] my-1" />
               <button className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#F5F5F5]">Browse this computer</button>
               <button className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-[#F5F5F5]">Upload and share</button>
