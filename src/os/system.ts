@@ -4,6 +4,7 @@ import { useWM } from './wm'
 import { cancelAllRuns, useRuns } from '@/agent/runs'
 
 interface SystemState {
+  trayOpen: boolean
   locked: boolean
   resetDialog: boolean
   resetting: boolean
@@ -11,7 +12,7 @@ interface SystemState {
 
 const skipLock = typeof window !== 'undefined' && (new URLSearchParams(location.search).has('skipLock') || sessionStorage.getItem('hw-unlocked') === '1')
 
-export const useSystem = create<SystemState>()(() => ({ locked: !skipLock, resetDialog: false, resetting: false }))
+export const useSystem = create<SystemState>()(() => ({ trayOpen: false, locked: !skipLock, resetDialog: false, resetting: false }))
 
 export const requestReset = () => useSystem.setState({ resetDialog: true })
 export const cancelReset = () => useSystem.setState({ resetDialog: false })
@@ -37,4 +38,16 @@ export async function doReset() {
   useWM.getState().resetAll()
   useDB.getState().reset()
   useSystem.setState({ resetting: false })
+}
+
+export const setTray = (open: boolean) => useSystem.setState({ trayOpen: open })
+
+if (typeof window !== 'undefined') {
+  // Alt+H (or Ctrl+Space) opens the H-Worker quick deploy panel from anywhere
+  window.addEventListener('keydown', (e) => {
+    if ((e.altKey && e.code === 'KeyH') || (e.ctrlKey && e.code === 'Space')) {
+      e.preventDefault()
+      useSystem.setState((s) => ({ trayOpen: !s.trayOpen }))
+    }
+  })
 }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DeskContext } from './context'
 import { APPS, getApp, logoUrl } from './registry'
 import { useWM, wm } from './wm'
@@ -8,6 +8,8 @@ import { StartMenu } from './StartMenu'
 import { AgentWallpaper, BloomWallpaper } from './Wallpaper'
 import { requestReset } from './system'
 import { useDB } from '@/db/db'
+
+const NONE: never[] = []
 
 function DesktopIcons({ deskId, isAgent }: { deskId: string; isAgent: boolean }) {
   const [sel, setSel] = useState<string | null>(null)
@@ -92,7 +94,7 @@ function ContextMenu({ x, y, onClose, deskId }: { x: number; y: number; onClose:
 }
 
 function Toasts({ deskId }: { deskId: string }) {
-  const toasts = useWM((s) => s.desks[deskId]?.toasts ?? [])
+  const toasts = useWM((s) => s.desks[deskId]?.toasts ?? NONE)
   return (
     <div className="absolute right-3 z-[9400] flex flex-col gap-2 w-[364px]" style={{ bottom: TASKBAR_H + 12 }}>
       {toasts.map((t) => {
@@ -134,9 +136,9 @@ function Toasts({ deskId }: { deskId: string }) {
  * A full desktop: wallpaper, icons, windows, taskbar, start menu, toasts.
  * `fixedSize` renders at a virtual resolution (agent desktops are scaled into the agent window).
  */
-export function Desktop({ deskId, isAgent = false, fixedSize }: { deskId: string; isAgent?: boolean; fixedSize?: { w: number; h: number } }) {
+export const Desktop = memo(function Desktop({ deskId, isAgent = false, fixedSize }: { deskId: string; isAgent?: boolean; fixedSize?: { w: number; h: number } }) {
   const ref = useRef<HTMLDivElement>(null)
-  const windows = useWM((s) => s.desks[deskId]?.windows ?? [])
+  const windows = useWM((s) => s.desks[deskId]?.windows ?? NONE)
   const epoch = useDB((s) => s.epoch)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
 
@@ -183,4 +185,4 @@ export function Desktop({ deskId, isAgent = false, fixedSize }: { deskId: string
       </div>
     </DeskContext.Provider>
   )
-}
+})

@@ -313,7 +313,7 @@ export function CalendarView({ params, nonce }: { params: any; nonce: number }) 
     setAnchor(n)
   }
 
-  const label = mode === 'day' ? anchor.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : `${days[0].toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} – ${days[days.length - 1].toLocaleDateString('en-US', { day: 'numeric', year: 'numeric' })}`
+  const label = mode === 'day' ? anchor.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : `${days[0].toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} – ${days[0].getMonth() === days[days.length - 1].getMonth() ? days[days.length - 1].getDate() : days[days.length - 1].toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}, ${days[days.length - 1].getFullYear()}`
 
   return (
     <div className="relative flex-1 min-h-0 flex flex-col">
@@ -388,7 +388,7 @@ export function CalendarView({ params, nonce }: { params: any; nonce: number }) 
                 <div className="relative flex" style={{ height: (END_H - START_H) * HOUR_H }}>
                   <div className="w-14 shrink-0">
                     {Array.from({ length: END_H - START_H }, (_, i) => (
-                      <div key={i} className="text-[11px] text-[#616161] text-right pr-2 -mt-1.5" style={{ height: HOUR_H }}>
+                      <div key={i} className="relative -top-2 text-[11px] text-[#616161] text-right pr-2" style={{ height: HOUR_H }}>
                         {new Date(2000, 0, 1, START_H + i).toLocaleTimeString('en-US', { hour: 'numeric' })}
                       </div>
                     ))}

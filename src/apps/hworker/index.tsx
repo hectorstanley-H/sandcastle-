@@ -35,7 +35,7 @@ import { WORKFLOWS, getWorkflow, matchWorkflows } from '@/workflows'
 import type { Workflow } from '@/agent/types'
 import { startRun } from '@/agent/runtime'
 import { useRuns, type Run } from '@/agent/runs'
-import { openAgentWindow, PlanList } from '@/agent/AgentWindow'
+import { openAgentWindow, PlanList, tileAgentWindows } from '@/agent/AgentWindow'
 import { requestReset } from '@/os/system'
 import { AppStack, HMark, Mono, WorkflowCard } from './shared'
 
@@ -293,6 +293,7 @@ function Home({ onPick, focusPrompt, go }: { onPick: (wf: Workflow, prompt?: str
         <div className="mt-8">
           <div className="flex items-center justify-between mb-2">
             <Mono>Working now</Mono>
+            {active.length > 1 && <button onClick={tileAgentWindows} className="text-[12.5px] font-semibold text-[#430693] hover:underline">Tile agent windows</button>}
           </div>
           <div className="grid grid-cols-2 gap-3">
             {active.map((r) => (
@@ -407,8 +408,25 @@ function AgentsView({ go }: { go: (v: View, runId?: string) => void }) {
   const live = all.filter((r) => ['running', 'paused', 'booting'].includes(r.status))
   return (
     <div className="max-w-[1040px] mx-auto px-10 pt-10 pb-16">
-      <Mono>Fleet</Mono>
-      <h1 className="mt-2 text-[28px] font-extrabold tracking-tight">Agents</h1>
+      <div className="flex items-end justify-between">
+        <div>
+          <Mono>Fleet</Mono>
+          <h1 className="mt-2 text-[28px] font-extrabold tracking-tight">Agents</h1>
+        </div>
+        <div className="flex gap-2">
+          {live.length > 1 && <button onClick={tileAgentWindows} className="h-9 px-4 rounded-full border border-[#E1DDD6] text-[12.5px] font-semibold hover:bg-[#F7F5F1]">Tile windows</button>}
+          <button
+            data-agent="hw-showcase"
+            onClick={() => {
+              WORKFLOWS.filter((w) => w.featured).slice(0, 3).forEach((w, i) => setTimeout(() => startRun(w.id), i * 700))
+              setTimeout(tileAgentWindows, 2400)
+            }}
+            className="h-9 px-4 rounded-full bg-[#0F0E12] text-white text-[12.5px] font-semibold flex items-center gap-1.5 hover:bg-[#2A2930]"
+          >
+            <Lightning size={14} weight="fill" /> Deploy 3 in parallel
+          </button>
+        </div>
+      </div>
       <p className="mt-1 text-[14px] text-[#3A3A44]">Every H-Worker runs on its own secure desktop. Watch any of them live or take over.</p>
       {live.length === 0 ? (
         <div className="mt-8 rounded-2xl border border-dashed border-[#D8D2C8] p-12 text-center">

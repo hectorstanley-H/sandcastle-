@@ -134,6 +134,15 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     if (!r) throw new Error('Agent desktop not mounted')
     return r
   }
+  /** wait (up to 6s) for the agent desktop to be mounted, e.g. after the agent window was re-rendered */
+  const ensureRoot = async () => {
+    const t0 = Date.now()
+    while (!rootOf(runId)) {
+      if (cancelFlags.has(runId)) throw new Cancelled()
+      if (Date.now() - t0 > 6000) throw new Error('Agent desktop not mounted')
+      await sleep(100)
+    }
+  }
 
   const gate = async () => {
     for (;;) {
@@ -167,6 +176,7 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     const t0 = Date.now()
     for (;;) {
       await gate()
+      await ensureRoot()
       const els = resolve(root(), target)
       const el = els[opts?.index ?? 0]
       if (el) return el
@@ -234,6 +244,7 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     },
     async open(appId, params) {
       await gate()
+      await ensureRoot()
       const app = getApp(appId)
       const desk = wm().desks[runId]
       const existing = desk?.windows.find((w) => w.appId === appId)

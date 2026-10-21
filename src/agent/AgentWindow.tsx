@@ -5,7 +5,7 @@ import { appIcon, getApp, logoUrl } from '@/os/registry'
 import { Desktop } from '@/os/Desktop'
 import { WindowControls } from '@/os/Window'
 import { useDesk, useWin } from '@/os/context'
-import { wm } from '@/os/wm'
+import { useWM, wm } from '@/os/wm'
 import { cancelRun, useRuns, type Run } from './runs'
 import { AGENT_SCREEN, startRun } from './runtime'
 
@@ -204,7 +204,10 @@ export function PlanList({ run, compact }: { run: Run; compact?: boolean }) {
 export default function AgentWindow({ params }: AppProps) {
   const runId = params?.runId as string
   const run = useRuns((s) => s.runs[runId])
-  const { toggleMax } = useWin()
+  const { toggleMax, win } = useWin()
+  const bounds = useWM((s) => s.desks.main?.bounds)
+  const width = win?.maximized ? bounds?.w ?? 1400 : win?.w ?? 1260
+  const narrow = width < 980
   const { openOnMain } = useDesk()
   const elapsed = useElapsed(run)
 
@@ -237,13 +240,13 @@ export default function AgentWindow({ params }: AppProps) {
           <span className="text-[11.5px] text-[#7A7A87] truncate">{run.title}</span>
         </div>
         <div className="flex-1" />
-        {activeApp && live && (
+        {activeApp && live && !narrow && (
           <div className="hidden md:flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-[#F1EEE9] text-[11.5px] text-[#3A3A44]">
             <img src={activeApp.icon} className="w-3.5 h-3.5 object-contain" alt="" /> Using {activeApp.name}
           </div>
         )}
         <span className="text-[11.5px] text-[#7A7A87] tabular-nums w-10 text-right" style={{ fontFamily: 'var(--font-mono)' }}>{elapsed}</span>
-        {live && (
+        {live && !narrow && (
           <div className="flex items-center h-7 rounded-full bg-[#F1EEE9] p-0.5" data-no-drag>
             {SPEEDS.map((s) => (
               <button
@@ -276,9 +279,23 @@ export default function AgentWindow({ params }: AppProps) {
         <WindowControls height={48} />
       </div>
       <div className="flex-1 min-h-0 flex">
-        <ScaledScreen run={run} />
+        <div className="flex-1 min-w-0 flex flex-col">
+          <ScaledScreen run={run} />
+          {narrow && (
+            <div className="shrink-0 h-12 flex items-center gap-3 px-4 border-t border-[#EAE5DD] bg-white">
+              {run.status === 'done' ? <CheckCircle size={16} weight="fill" className="text-[#0E700E] shrink-0" /> : <CircleNotch size={16} className="text-[#430693] animate-spin shrink-0" />}
+              <span className="text-[12px] font-semibold truncate flex-1">{run.status === 'done' ? run.result?.summary : run.plan[Math.max(0, run.planIndex)] ?? 'Starting…'}</span>
+              <span className="text-[11px] text-[#7A7A87] tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>{pct}%</span>
+              {run.status === 'done' && run.result?.outputs[0] && (
+                <button onClick={() => openOnMain(run.result!.outputs[0].appId, run.result!.outputs[0].params)} className="h-7 px-2.5 rounded-full bg-[#0F0E12] text-white text-[11px] font-semibold flex items-center gap-1 shrink-0">
+                  <ArrowSquareOut size={12} /> View
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         {/* side panel */}
-        <aside className="w-[340px] shrink-0 flex flex-col border-l border-[#EAE5DD] bg-white">
+        {!narrow && <aside className="w-[340px] shrink-0 flex flex-col border-l border-[#EAE5DD] bg-white">
           <div className="px-5 pt-4 pb-3 border-b border-[#EAE5DD]">
             <div className="text-[10.5px] tracking-[0.12em] text-[#7A7A87] mb-1.5" style={{ fontFamily: 'var(--font-mono)' }}>TASK</div>
             <div className="text-[14px] font-bold leading-snug">{run.title}</div>
@@ -349,7 +366,7 @@ export default function AgentWindow({ params }: AppProps) {
               <Lightning size={13} weight="fill" className="text-[#5A0CC0]" /> Powered by Holo · computer-use model
             </div>
           )}
-        </aside>
+        </aside>}
       </div>
     </div>
   )
@@ -359,4 +376,22 @@ export function openAgentWindow(runId: string) {
   const w = wm().desks.main?.windows.find((x) => x.appId === 'agent' && x.params?.runId === runId)
   if (w) wm().focus('main', w.id)
   else wm().open('main', 'agent', { runId })
+}
+
+/** Arrange every agent window on the user's desktop in a grid (multi-agent "mission control"). */
+export function tileAgentWindows() {
+  const desk = wm().desks.main
+  if (!desk) return
+  const wins = desk.windows.filter((w) => w.appId === 'agent' && !w.minimized)
+  if (!wins.length) return
+  const { w: bw, h: bh } = desk.bounds
+  const cols = wins.length <= 1 ? 1 : wins.length <= 4 ? 2 : 3
+  const rows = Math.ceil(wins.length / cols)
+  const gw = Math.floor((bw - 8 * (cols + 1)) / cols)
+  const gh = Math.floor((bh - 8 * (rows + 1)) / rows)
+  wins.forEach((w, i) => {
+    const c = i % cols
+    const r = Math.floor(i / cols)
+    wm().patch('main', w.id, { maximized: false, x: 8 + c * (gw + 8), y: 8 + r * (gh + 8), w: gw, h: gh })
+  })
 }

@@ -4,6 +4,7 @@ import { APPS, getApp, logoUrl } from './registry'
 import { useWM, wm } from './wm'
 import { TrayFlyout } from '@/apps/hworker/TrayFlyout'
 import { useRuns } from '@/agent/runs'
+import { setTray, useSystem } from './system'
 
 export const TASKBAR_H = 48
 
@@ -54,7 +55,8 @@ export function Taskbar() {
   const { deskId, isAgent } = useContext(DeskContext)
   const desk = useWM((s) => s.desks[deskId])
   const now = useClock()
-  const [trayOpen, setTrayOpen] = useState(false)
+  const trayOpen = useSystem((s) => s.trayOpen)
+  const setTrayOpen = (fn: (o: boolean) => boolean) => setTray(fn(trayOpen))
   const runningAgents = useRuns((s) => Object.values(s.runs).filter((r) => r.status === 'running' || r.status === 'paused').length)
   if (!desk) return null
   const pinned = APPS.filter((a) => a.pinned && !(isAgent && a.id === 'hworker'))
@@ -159,7 +161,7 @@ export function Taskbar() {
           </button>
         </div>
       </div>
-      {!isAgent && trayOpen && <TrayFlyout onClose={() => setTrayOpen(false)} />}
+      {!isAgent && trayOpen && <TrayFlyout onClose={() => setTray(false)} />}
     </>
   )
 }

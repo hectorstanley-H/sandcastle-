@@ -8,8 +8,9 @@ import { workflows as finance } from './finance'
 import { workflows as hr } from './hr'
 import { workflows as sales } from './sales'
 import { workflows as it } from './it'
+import { workflows as system } from './system'
 
-export const WORKFLOWS: Workflow[] = [...core, ...finance, ...hr, ...sales, ...it, ...m365]
+export const WORKFLOWS: Workflow[] = [...core, ...finance, ...hr, ...sales, ...it, ...m365, ...system]
 
 export const getWorkflow = (id: string) => WORKFLOWS.find((w) => w.id === id)
 
