@@ -1,0 +1,248 @@
+@import 'tailwindcss';
+
+:root {
+  --font-win: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --font-brand: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'Fira Code', 'SF Mono', ui-monospace, monospace;
+  --font-sap: '72', '72full', 'Inter', Arial, Helvetica, sans-serif;
+  --font-sf: 'Salesforce Sans', 'Inter', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+
+  --h-iris: #430693;
+  --h-iris-50: #f1ecf9;
+  --h-iris-100: #decef3;
+  --h-iris-300: #9a5bec;
+  --h-iris-400: #7114eb;
+  --h-iris-500: #5a0cc0;
+  --h-ink: #0f0e12;
+  --h-graphite: #3a3a44;
+  --h-steel: #7a7a87;
+  --h-limestone: #eae5dd;
+  --h-paper: #f1eee9;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+}
+body {
+  font-family: var(--font-win);
+  -webkit-font-smoothing: antialiased;
+  color: #1a1a1a;
+}
+button {
+  cursor: default;
+}
+input,
+textarea,
+select {
+  font: inherit;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #8a8886;
+}
+
+/* thin Windows 11 scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+@keyframes win-open {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.win-open {
+  animation: win-open 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+@keyframes start-open {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 40px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.start-open {
+  animation: start-open 220ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+@keyframes menu-open {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.menu-open {
+  animation: menu-open 140ms ease-out;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.toast-in {
+  animation: toast-in 260ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+@keyframes agent-ripple {
+  from {
+    transform: scale(0.3);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+.agent-ripple {
+  animation: agent-ripple 600ms ease-out forwards;
+}
+.typing-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+.typing-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 9px;
+  background: #fff;
+  animation: blink 1s infinite;
+}
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes boot-bar {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+.boot-bar {
+  animation: boot-bar 1.4s ease-in-out forwards;
+}
+@keyframes feed-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.feed-in {
+  animation: feed-in 220ms ease-out;
+}
+.result-in {
+  animation: feed-in 400ms ease-out;
+}
+
+/* border beam around the live agent screen */
+@property --beam-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.beam {
+  background: conic-gradient(from var(--beam-angle), rgba(154, 91, 236, 0.15) 0deg, #9a5bec 40deg, #c2a0ee 70deg, rgba(154, 91, 236, 0.15) 120deg, rgba(154, 91, 236, 0.15) 360deg);
+  animation: beam-spin 3.2s linear infinite;
+  box-shadow: 0 0 40px rgba(113, 20, 235, 0.35);
+}
+@keyframes beam-spin {
+  to {
+    --beam-angle: 360deg;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 300ms ease-out;
+}
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.slide-up {
+  animation: slide-up 320ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+@keyframes shimmer {
+  from {
+    background-position: -400px 0;
+  }
+  to {
+    background-position: 400px 0;
+  }
+}
+.shimmer {
+  background: linear-gradient(90deg, #f1eee9 0, #fbfaf8 40px, #f1eee9 80px);
+  background-size: 800px 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+@keyframes flash-highlight {
+  0% {
+    background-color: rgba(255, 214, 0, 0.45);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.flash-new {
+  animation: flash-highlight 2.2s ease-out;
+}
