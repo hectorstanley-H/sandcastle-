@@ -9,7 +9,6 @@ import { useWM, wm } from '@/os/wm'
 import { cancelRun, useRuns, type Run } from './runs'
 import { AGENT_SCREEN, startRun } from './runtime'
 
-const SPEEDS = [0.5, 1, 2, 4]
 
 function useElapsed(run?: Run) {
   const [, force] = useState(0)
@@ -247,20 +246,6 @@ export default function AgentWindow({ params }: AppProps) {
           </div>
         )}
         <span className="text-[11.5px] text-[#7A7A87] tabular-nums w-10 text-right" style={{ fontFamily: 'var(--font-mono)' }}>{elapsed}</span>
-        {live && !narrow && (
-          <div className="flex items-center h-7 rounded-full bg-[#F1EEE9] p-0.5" data-no-drag>
-            {SPEEDS.map((s) => (
-              <button
-                key={s}
-                onClick={() => useRuns.getState().patch(run.id, { speed: s })}
-                className={`h-6 px-2 rounded-full text-[11px] font-semibold transition-colors ${run.speed === s ? 'bg-white shadow-sm text-[#430693]' : 'text-[#3A3A44] hover:text-[#0F0E12]'}`}
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                {s}×
-              </button>
-            ))}
-          </div>
-        )}
         {live && (
           <>
             <button
