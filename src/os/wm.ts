@@ -159,7 +159,7 @@ export const useWM = create<WMState>()((set, get) => {
     toast: (desk, t) => {
       const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       mut(desk, (d) => ({ toasts: [...d.toasts.slice(-3), { ...t, id, at: Date.now() }] }))
-      setTimeout(() => get().dismissToast(desk, id), 9000)
+      setTimeout(() => get().dismissToast(desk, id), t.action ? 25000 : 9000)
     },
     dismissToast: (desk, id) => mut(desk, (d) => ({ toasts: d.toasts.filter((t) => t.id !== id) })),
     dropDesk: (desk) =>

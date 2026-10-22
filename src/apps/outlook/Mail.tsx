@@ -81,6 +81,8 @@ export interface Email extends Rec {
 }
 
 export interface ComposeState {
+  /** identity of this draft (so a delayed "sent" close never closes a newer draft) */
+  key?: string
   mode: 'new' | 'reply' | 'replyAll' | 'forward'
   to: string[]
   cc: string[]
@@ -162,7 +164,8 @@ function RibbonButton({ icon: Icon, label, onClick, agent, disabled, primary, ch
 
 /* ─────────────────────────── Compose ─────────────────────────── */
 
-function Compose({ state, onChange, onClose }: { state: ComposeState; onChange: (s: ComposeState) => void; onClose: () => void }) {
+function Compose({ state, onChange, onClose: close }: { state: ComposeState; onChange: (s: ComposeState) => void; onClose: (key?: string) => void }) {
+  const onClose = () => close(state.key)
   const { isAgent } = useDesk()
   const files = useCollection('files')
   const [showCc, setShowCc] = useState(state.cc.length > 0)
@@ -194,6 +197,7 @@ function Compose({ state, onChange, onClose }: { state: ComposeState; onChange: 
       onClose()
     }, 450)
   }
+
 
   return (
     <div className="flex-1 flex flex-col m-2 ml-0 bg-white rounded-lg shadow-[0_0_2px_rgba(0,0,0,0.12),0_2px_4px_rgba(0,0,0,0.14)] overflow-hidden" data-agent="outlook-compose">
@@ -389,7 +393,9 @@ export function MailView({ params, nonce, search }: { params: any; nonce: number
   const { open } = useDesk()
   const [folder, setFolder] = useState<string>('inbox')
   const [selected, setSelected] = useState<string | null>(null)
-  const [compose, setCompose] = useState<ComposeState | null>(null)
+  const [compose, setComposeRaw] = useState<ComposeState | null>(null)
+  const setCompose = (c: ComposeState | null) => setComposeRaw(c ? { ...c, key: c.key ?? uid('draft') } : null)
+  const closeCompose = (key?: string) => setComposeRaw((c) => (!c || !key || c.key === key ? null : c))
   const [pivot, setPivot] = useState<'focused' | 'other'>('focused')
   const [catMenu, setCatMenu] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -613,7 +619,7 @@ export function MailView({ params, nonce, search }: { params: any; nonce: number
           </div>
         </div>
         {compose ? (
-          <Compose state={composeBodyFix(compose)} onChange={setCompose} onClose={() => setCompose(null)} />
+          <Compose state={composeBodyFix(compose)} onChange={setCompose} onClose={(key) => closeCompose(key)} />
         ) : (
           <ReadingPane email={sel} onReply={reply} deskOpen={open} />
         )}
