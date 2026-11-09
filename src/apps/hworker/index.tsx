@@ -26,6 +26,7 @@ import {
   MagicWand,
   UsersThree,
   Exam,
+  Cloud,
 } from '@phosphor-icons/react'
 import type { AppProps } from '@/os/registry'
 import { APPS, appIcon, getApp } from '@/os/registry'
@@ -46,8 +47,10 @@ import { BuilderView } from './Builder'
 import { WorkforceView } from './Workforce'
 import { EvalsView } from './Evals'
 import { useFleet } from '@/agent/fleet'
+import { CloudAgentsView } from './CloudAgents'
+import { useCloud } from '@/agent/cloud'
 
-type View = 'home' | 'workflows' | 'builder' | 'workforce' | 'evals' | 'agents' | 'activity' | 'integrations' | 'settings'
+type View = 'home' | 'workflows' | 'builder' | 'cloud' | 'workforce' | 'evals' | 'agents' | 'activity' | 'integrations' | 'settings'
 
 const greet = () => {
   const h = new Date().getHours()
@@ -664,6 +667,12 @@ export default function HWorker({ win, params }: AppProps) {
   const [sheet, setSheet] = useState<{ wf: Workflow; prompt?: string } | null>(null)
   const [selRun, setSelRun] = useState<string | undefined>()
   const [focusPrompt, setFocusPrompt] = useState(false)
+  const cloudIds = useCloud((s) => s.ids)
+  const cloudNonce = useCloud((s) => s.nonce)
+  const cloudLive = useRuns((s) => cloudIds.filter((id) => ['running', 'paused', 'booting', 'awaiting'].includes(s.runs[id]?.status)).length)
+  useEffect(() => {
+    if (cloudNonce) setView('cloud')
+  }, [cloudNonce])
   const fleetReviews = useFleet((s) => s.fleet?.agents.filter((a) => a.status === 'review').length ?? 0)
   const liveCount = useRuns((s) => Object.values(s.runs).filter((r) => ['running', 'paused', 'booting', 'awaiting'].includes(r.status)).length)
 
@@ -686,6 +695,7 @@ export default function HWorker({ win, params }: AppProps) {
     ['home', House, 'Home'],
     ['workflows', SquaresFour, 'Workflows'],
     ['builder', MagicWand, 'Builder'],
+    ['cloud', Cloud, 'Cloud agents', cloudLive],
     ['workforce', UsersThree, 'Workforce', fleetReviews],
     ['evals', Exam, 'Evals'],
     ['agents', Robot, 'Agents', liveCount],
@@ -753,6 +763,12 @@ export default function HWorker({ win, params }: AppProps) {
           {view === 'activity' && <ActivityView selectedId={selRun} setSelected={setSelRun} />}
           {view === 'integrations' && <IntegrationsView />}
           {view === 'settings' && <SettingsView />}
+          {/* cloud agents stay mounted (off-screen) on other tabs so their desktops keep running */}
+          {(view === 'cloud' || cloudIds.length > 0) && (
+            <div className={view === 'cloud' ? '' : 'absolute top-0 left-[-20000px] w-[1200px] h-[800px] overflow-hidden pointer-events-none'}>
+              <CloudAgentsView active={view === 'cloud'} />
+            </div>
+          )}
         </main>
       </div>
       {sheet && <DeploySheet wf={sheet.wf} prompt={sheet.prompt} onClose={() => setSheet(null)} onDeployed={() => setSheet(null)} />}

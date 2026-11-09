@@ -51,6 +51,9 @@ function GlobalSearch() {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const h = (e: MouseEvent) => {
+      // ignore clicks on other desktops (e.g. another agent working at the same time)
+      const desk = ref.current?.closest('[data-desk]')
+      if (desk && !desk.contains(e.target as Node)) return
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', h)

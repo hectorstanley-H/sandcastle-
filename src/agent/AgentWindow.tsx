@@ -11,6 +11,7 @@ import { AGENT_SCREEN, startRun } from './runtime'
 import { allLargeCost, fmtMs, fmtUsd, MODELS, RATES, stepCost, VIA_STYLE, viaLabel } from './execution'
 import type { PlanStep } from './types'
 import { getWorkflow } from '@/workflows'
+import { focusCloudAgent } from './cloud'
 
 const currentStep = (run: Run): PlanStep | undefined => (run.status === 'done' ? undefined : run.plan[run.planIndex])
 
@@ -30,7 +31,7 @@ export function ViaChip({ step, compact }: { step: PlanStep; compact?: boolean }
   )
 }
 
-function runCosts(run: Run) {
+export function runCosts(run: Run) {
   const agent = run.plan.reduce((s, p, i) => s + stepCost(p, run.usage?.[i]), 0)
   const large = (run.usage ?? []).reduce((s, u) => s + allLargeCost(u), 0)
   const minutes = parseInt(getWorkflow(run.workflowId)?.timeSaved ?? '20') || 20
@@ -110,7 +111,7 @@ function AgentCursor({ run }: { run: Run }) {
   const [ripples, setRipples] = useState<number[]>([])
   useEffect(() => {
     if (!c.clicks) return
-    setRipples((r) => [...r.slice(-2), c.clicks])
+    setRipples((r) => (r.includes(c.clicks) ? r : [...r.slice(-2), c.clicks]))
     const t = setTimeout(() => setRipples((r) => r.filter((x) => x !== c.clicks)), 650)
     return () => clearTimeout(t)
   }, [c.clicks])
@@ -152,7 +153,7 @@ function BootOverlay({ run }: { run: Run }) {
   )
 }
 
-function ScaledScreen({ run }: { run: Run }) {
+export function ScaledScreen({ run, compact }: { run: Run; compact?: boolean }) {
   const wrap = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.5)
   useLayoutEffect(() => {
@@ -184,14 +185,14 @@ function ScaledScreen({ run }: { run: Run }) {
         </div>
       </div>
       <OffscreenBanner run={run} />
-      <div className="absolute left-4 bottom-3 flex items-center gap-2 text-[11px] text-white/50" style={{ fontFamily: 'var(--font-mono)' }}>
+      {!compact && <div className="absolute left-4 bottom-3 flex items-center gap-2 text-[11px] text-white/50" style={{ fontFamily: 'var(--font-mono)' }}>
         <ShieldCheck size={13} /> ISOLATED VM · {AGENT_SCREEN.w}×{AGENT_SCREEN.h} · SSO: ALEX.MORGAN@NORTHWIND.COM
-      </div>
+      </div>}
     </div>
   )
 }
 
-function StatusPill({ status }: { status: Run['status'] }) {
+export function StatusPill({ status }: { status: Run['status'] }) {
   const map: Record<Run['status'], [string, string, string]> = {
     booting: ['Starting', '#F1ECF9', '#430693'],
     running: ['Working', '#F1ECF9', '#430693'],
@@ -476,6 +477,14 @@ export default function AgentWindow({ params }: AppProps) {
 }
 
 export function openAgentWindow(runId: string) {
+  // cloud agents live as tiles inside H-Worker — mounting a second copy of their screen would conflict
+  if (useRuns.getState().runs[runId]?.host === 'cloud') {
+    focusCloudAgent(runId)
+    const hw = wm().desks.main?.windows.find((x) => x.appId === 'hworker')
+    if (hw) wm().focus('main', hw.id)
+    else wm().open('main', 'hworker', { view: 'cloud' })
+    return
+  }
   const w = wm().desks.main?.windows.find((x) => x.appId === 'agent' && x.params?.runId === runId)
   if (w) wm().focus('main', w.id)
   else wm().open('main', 'agent', { runId })

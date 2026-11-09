@@ -140,6 +140,11 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     const t0 = Date.now()
     while (!rootOf(runId)) {
       if (cancelFlags.has(runId)) throw new Cancelled()
+      if (run()?.host === 'cloud' && Date.now() - t0 > 2500) {
+        runs().patch(runId, { host: 'window' })
+        runs().addLog(runId, { kind: 'info', text: 'Cloud view closed — moved this agent to its own window' })
+        wm().open('main', 'agent', { runId })
+      }
       if (Date.now() - t0 > 6000) throw new Error('Agent desktop not mounted')
       await sleep(100)
     }
@@ -467,7 +472,7 @@ function closeStep(runId: string) {
 let agentCounter = 0
 
 /** Start a workflow on a fresh agent desktop. Returns the run id. */
-export function startRun(workflowId: string, inputs: Record<string, any> = {}, opts?: { prompt?: string; speed?: number }) {
+export function startRun(workflowId: string, inputs: Record<string, any> = {}, opts?: { prompt?: string; speed?: number; cloud?: boolean }) {
   const wf = getWorkflow(workflowId)
   if (!wf) throw new Error(`Unknown workflow ${workflowId}`)
   const id = uid('run')
@@ -489,10 +494,11 @@ export function startRun(workflowId: string, inputs: Record<string, any> = {}, o
     log: [],
     cursor: { x: AGENT_SCREEN.w / 2, y: AGENT_SCREEN.h / 2 - 40, dur: 0, clicks: 0, visible: false, typing: false },
     startedAt: Date.now(),
+    host: opts?.cloud ? 'cloud' : 'window',
   }
   useRuns.setState((s) => ({ runs: { ...s.runs, [id]: run } }))
   wm().ensureDesk(id, true, { w: AGENT_SCREEN.w, h: AGENT_SCREEN.h - TASKBAR_H })
-  wm().open('main', 'agent', { runId: id })
+  if (!opts?.cloud) wm().open('main', 'agent', { runId: id })
   hwlog('start', workflowId, id)
 
   const agent = createAgent(id, merged)
