@@ -1,13 +1,14 @@
 /** Live state of agent runs (in-memory). Finished runs are also persisted to db `hworker.runs`. */
 import { create } from 'zustand'
-import type { WorkflowResult } from './types'
+import type { PlanStep, WorkflowResult } from './types'
+import type { StepUsage } from './execution'
 
 export type RunStatus = 'booting' | 'running' | 'paused' | 'awaiting' | 'done' | 'failed' | 'cancelled'
 
 export interface LogEntry {
   id: number
   t: number
-  kind: 'think' | 'action' | 'info' | 'success' | 'warn' | 'error' | 'step' | 'open'
+  kind: 'think' | 'action' | 'info' | 'success' | 'warn' | 'error' | 'step' | 'open' | 'api' | 'code'
   text: string
   appId?: string
 }
@@ -22,8 +23,11 @@ export interface Run {
   inputs: Record<string, any>
   status: RunStatus
   speed: number
-  plan: string[]
+  plan: PlanStep[]
   planIndex: number
+  /** usage per plan step (actions, reasoning passes, API calls, time) */
+  usage: StepUsage[]
+  stepStartedAt?: number
   log: LogEntry[]
   cursor: { x: number; y: number; dur: number; clicks: number; visible: boolean; typing: boolean }
   activeApp?: string

@@ -10,6 +10,7 @@ import { TASKBAR_H } from '@/os/Taskbar'
 import { getWorkflow } from '@/workflows'
 import { cancelFlags, runs, useRuns, type Run } from './runs'
 import type { ActOpts, AgentAPI, Target, WorkflowResult } from './types'
+import { emptyUsage, normalizePlan, type StepUsage } from './execution'
 
 export const AGENT_SCREEN = { w: 1440, h: 900 }
 
@@ -192,6 +193,16 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     return appId
   }
 
+  /** add to the usage counters of the current plan step */
+  const bump = (k: keyof StepUsage, n = 1) => {
+    runs().patch(runId, (r) => {
+      if (r.planIndex < 0 || !r.usage[r.planIndex]) return {}
+      const usage = r.usage.slice()
+      usage[r.planIndex] = { ...usage[r.planIndex], [k]: usage[r.planIndex][k] + n }
+      return { usage }
+    })
+  }
+
   const action = (text: string, appId?: string) => {
     runs().addLog(runId, { kind: 'action', text, appId })
     if (DEBUG) hwlog('action', text)
@@ -205,6 +216,7 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     await delay(90)
     if (!el.isConnected) return
     runs().patch(runId, (rr) => ({ cursor: { ...rr.cursor, clicks: rr.cursor.clicks + 1 } }))
+    bump('actions')
     fire(el, 'pointerover')
     fire(el, 'mouseover')
     fire(el, 'pointerdown')
@@ -228,6 +240,7 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     async think(text, ms = 1100) {
       await gate()
       runs().addLog(runId, { kind: 'think', text })
+      bump('thinks')
       if (DEBUG) hwlog('think', text)
       await delay(ms)
     },
@@ -238,9 +251,10 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
     step(i) {
       const r = run()
       if (!r) return
-      runs().patch(runId, { planIndex: i })
-      runs().addLog(runId, { kind: 'step', text: r.plan[i] ?? `Step ${i + 1}` })
-      hwlog('step', i, r.plan[i])
+      closeStep(runId)
+      runs().patch(runId, { planIndex: i, stepStartedAt: Date.now() })
+      runs().addLog(runId, { kind: 'step', text: r.plan[i]?.text ?? `Step ${i + 1}` })
+      hwlog('step', i, r.plan[i]?.text)
     },
     async open(appId, params) {
       await gate()
@@ -326,6 +340,7 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
       const el = target ? await find(target) : lastTyped ?? (root().querySelector(':focus') as HTMLElement) ?? root()
       fire(el, 'keydown', { key, code: key })
       fire(el, 'keyup', { key, code: key })
+      bump('actions')
       if (key === 'Enter' && el instanceof HTMLInputElement && el.form) el.form.requestSubmit()
       action(`Press ${key}`, activeAppOf(el))
       await delay(220)
@@ -361,6 +376,29 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
         }
         await sleep(150)
       }
+    },
+    async api(call, fn, opts) {
+      await gate()
+      runs().addLog(runId, { kind: 'api', text: call, appId: opts?.appId })
+      if (DEBUG) hwlog('api', call)
+      bump('apiCalls')
+      const t0 = Date.now()
+      const res = await fn()
+      // network round-trip feel, but fast — the point is that no screen is involved
+      await sleep(Math.max(0, (opts?.ms ?? 260) - (Date.now() - t0)) / speed())
+      if (opts?.result) runs().addLog(runId, { kind: 'info', text: `→ ${opts.result(res)}` })
+      await delay(350)
+      return res
+    },
+    async code(label, fn, opts) {
+      await gate()
+      runs().addLog(runId, { kind: 'code', text: label })
+      if (DEBUG) hwlog('code', label)
+      const res = await fn()
+      await sleep((opts?.ms ?? 120) / speed())
+      if (opts?.result) runs().addLog(runId, { kind: 'info', text: `→ ${opts.result(res)}` })
+      await delay(350)
+      return res
     },
     async close(appId) {
       const el = resolve(root(), `@close-${appId}`)[0]
@@ -416,6 +454,16 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
   return api
 }
 
+/** add the time spent on the current step to its usage */
+function closeStep(runId: string) {
+  runs().patch(runId, (r) => {
+    if (r.planIndex < 0 || !r.stepStartedAt || !r.usage[r.planIndex]) return {}
+    const usage = r.usage.slice()
+    usage[r.planIndex] = { ...usage[r.planIndex], ms: usage[r.planIndex].ms + (Date.now() - r.stepStartedAt) }
+    return { usage, stepStartedAt: undefined }
+  })
+}
+
 let agentCounter = 0
 
 /** Start a workflow on a fresh agent desktop. Returns the run id. */
@@ -435,8 +483,9 @@ export function startRun(workflowId: string, inputs: Record<string, any> = {}, o
     inputs: merged,
     status: 'booting',
     speed: opts?.speed ?? urlSpeed ?? 1,
-    plan: wf.plan,
+    plan: normalizePlan(wf.plan),
     planIndex: -1,
+    usage: wf.plan.map(emptyUsage),
     log: [],
     cursor: { x: AGENT_SCREEN.w / 2, y: AGENT_SCREEN.h / 2 - 40, dur: 0, clicks: 0, visible: false, typing: false },
     startedAt: Date.now(),
@@ -455,6 +504,7 @@ export function startRun(workflowId: string, inputs: Record<string, any> = {}, o
       runs().patch(id, { status: 'running' })
       await sleep(600 / run.speed)
       const result: WorkflowResult = await wf.run(agent, merged)
+      closeStep(id)
       runs().patch(id, { status: 'done', endedAt: Date.now(), result, planIndex: wf.plan.length, cursor: { ...useRuns.getState().runs[id].cursor, typing: false } })
       runs().addLog(id, { kind: 'success', text: 'Task complete' })
       hwlog('done', workflowId, JSON.stringify(result.summary))
@@ -476,6 +526,7 @@ export function startRun(workflowId: string, inputs: Record<string, any> = {}, o
         hwlog('error', workflowId, String(e?.message ?? e))
       }
     } finally {
+      closeStep(id)
       const r = useRuns.getState().runs[id]
       if (r) {
         db.upsert('hworker.runs', {
@@ -493,6 +544,8 @@ export function startRun(workflowId: string, inputs: Record<string, any> = {}, o
           actions: r.log.filter((l) => l.kind === 'action' || l.kind === 'open').length,
           apps: Array.from(new Set(r.log.map((l) => l.appId).filter(Boolean))),
           log: r.log.slice(-400),
+          plan: r.plan,
+          usage: r.usage,
         })
       }
     }

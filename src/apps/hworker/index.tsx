@@ -23,6 +23,9 @@ import {
   WarningCircle,
   Eye,
   CalendarBlank,
+  MagicWand,
+  UsersThree,
+  Exam,
 } from '@phosphor-icons/react'
 import type { AppProps } from '@/os/registry'
 import { APPS, appIcon, getApp } from '@/os/registry'
@@ -35,11 +38,16 @@ import { WORKFLOWS, getWorkflow, matchWorkflows } from '@/workflows'
 import type { Workflow } from '@/agent/types'
 import { startRun } from '@/agent/runtime'
 import { useRuns, type Run } from '@/agent/runs'
-import { openAgentWindow, PlanList, tileAgentWindows } from '@/agent/AgentWindow'
+import { openAgentWindow, PlanList, tileAgentWindows, ViaChip } from '@/agent/AgentWindow'
+import { normalizePlan } from '@/agent/execution'
 import { requestReset } from '@/os/system'
 import { AppStack, HMark, Mono, WorkflowCard } from './shared'
+import { BuilderView } from './Builder'
+import { WorkforceView } from './Workforce'
+import { EvalsView } from './Evals'
+import { useFleet } from '@/agent/fleet'
 
-type View = 'home' | 'workflows' | 'agents' | 'activity' | 'integrations' | 'settings'
+type View = 'home' | 'workflows' | 'builder' | 'workforce' | 'evals' | 'agents' | 'activity' | 'integrations' | 'settings'
 
 const greet = () => {
   const h = new Date().getHours()
@@ -97,10 +105,10 @@ function DeploySheet({ wf, prompt, onClose, onDeployed }: { wf: Workflow; prompt
           <div>
             <Mono>Plan</Mono>
             <ol className="mt-3 space-y-2.5">
-              {wf.plan.map((p, i) => (
+              {normalizePlan(wf.plan).map((p, i) => (
                 <li key={i} className="flex gap-3 text-[13px] leading-snug">
                   <span className="w-5 h-5 shrink-0 rounded-full bg-[#F1EEE9] text-[10.5px] font-bold flex items-center justify-center text-[#3A3A44]" style={{ fontFamily: 'var(--font-mono)' }}>{i + 1}</span>
-                  <span className="pt-0.5">{p}</span>
+                  <span className="pt-0.5 flex-1 flex flex-wrap items-center gap-x-2 gap-y-1"><span>{p.text}</span><ViaChip step={p} /></span>
                 </li>
               ))}
             </ol>
@@ -552,7 +560,7 @@ function ActivityView({ selectedId, setSelected }: { selectedId?: string; setSel
                 <div key={i} className="flex gap-2.5 text-[12px] leading-snug">
                   <span className="w-14 shrink-0 text-[10.5px] text-[#9A97A3] pt-[1px]" style={{ fontFamily: 'var(--font-mono)' }}>{new Date(l.t).toLocaleTimeString('en-US', { hour12: false })}</span>
                   {l.appId ? <img src={appIcon(l.appId)} className="w-3.5 h-3.5 mt-[1px] object-contain" alt="" /> : <span className="w-3.5" />}
-                  <span className={l.kind === 'think' ? 'italic text-[#3A3A44]' : l.kind === 'error' ? 'text-[#A4262C]' : ''}>{l.text}</span>
+                  <span className={l.kind === 'think' ? 'italic text-[#3A3A44]' : l.kind === 'error' ? 'text-[#A4262C]' : l.kind === 'api' || l.kind === 'code' ? 'text-[#0B5394]' : ''} style={l.kind === 'api' || l.kind === 'code' ? { fontFamily: 'var(--font-mono)' } : undefined}>{l.kind === 'api' ? 'API · ' : l.kind === 'code' ? 'CODE · ' : ''}{l.text}</span>
                 </div>
               ))}
               {!sel.log?.length && <div className="text-[12px] text-[#7A7A87]">Detailed log not retained for this run.</div>}
@@ -656,6 +664,7 @@ export default function HWorker({ win, params }: AppProps) {
   const [sheet, setSheet] = useState<{ wf: Workflow; prompt?: string } | null>(null)
   const [selRun, setSelRun] = useState<string | undefined>()
   const [focusPrompt, setFocusPrompt] = useState(false)
+  const fleetReviews = useFleet((s) => s.fleet?.agents.filter((a) => a.status === 'review').length ?? 0)
   const liveCount = useRuns((s) => Object.values(s.runs).filter((r) => ['running', 'paused', 'booting', 'awaiting'].includes(r.status)).length)
 
   useEffect(() => {
@@ -676,6 +685,9 @@ export default function HWorker({ win, params }: AppProps) {
   const nav: [View, any, string, number?][] = [
     ['home', House, 'Home'],
     ['workflows', SquaresFour, 'Workflows'],
+    ['builder', MagicWand, 'Builder'],
+    ['workforce', UsersThree, 'Workforce', fleetReviews],
+    ['evals', Exam, 'Evals'],
     ['agents', Robot, 'Agents', liveCount],
     ['activity', ClockCounterClockwise, 'Activity'],
     ['integrations', PlugsConnected, 'Applications'],
@@ -720,8 +732,8 @@ export default function HWorker({ win, params }: AppProps) {
           <div className="flex-1" />
           <div className="rounded-xl bg-[#0F0E12] text-white p-3.5 relative overflow-hidden">
             <div className="absolute inset-0" style={{ background: 'radial-gradient(200px 120px at 100% 0%, rgba(113,20,235,0.55), transparent 70%)' }} />
-            <div className="relative flex items-center gap-1.5 text-[12px] font-bold"><Lightning size={14} weight="fill" className="text-[#C2A0EE]" /> Holo 2 · computer use</div>
-            <div className="relative mt-1 text-[11px] text-white/60 leading-snug">Agents see and operate apps like a person — no integrations required.</div>
+            <div className="relative flex items-center gap-1.5 text-[12px] font-bold"><Lightning size={14} weight="fill" className="text-[#C2A0EE]" /> Holo 4 · hybrid execution</div>
+            <div className="relative mt-1 text-[11px] text-white/60 leading-snug">Each step runs the cheapest reliable way: API, code, or computer use on screen.</div>
           </div>
           <div className="mt-3 flex items-center gap-2.5 px-1">
             <span className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[11px] font-bold" style={{ background: ME.color }}>AM</span>
@@ -734,6 +746,9 @@ export default function HWorker({ win, params }: AppProps) {
         <main className="flex-1 min-w-0 overflow-auto bg-white" style={{ backgroundImage: view === 'home' ? 'radial-gradient(800px 300px at 100% 0%, rgba(241,236,249,0.9), transparent 70%)' : undefined }}>
           {view === 'home' && <Home onPick={(wf, prompt) => setSheet({ wf, prompt })} focusPrompt={focusPrompt} go={go} />}
           {view === 'workflows' && <WorkflowsView onPick={(wf) => setSheet({ wf })} />}
+          {view === 'builder' && <BuilderView />}
+          {view === 'workforce' && <WorkforceView />}
+          {view === 'evals' && <EvalsView />}
           {view === 'agents' && <AgentsView go={go} />}
           {view === 'activity' && <ActivityView selectedId={selRun} setSelected={setSelRun} />}
           {view === 'integrations' && <IntegrationsView />}

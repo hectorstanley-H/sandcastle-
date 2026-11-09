@@ -38,7 +38,7 @@ export const workflows: Workflow[] = [
       const n = db.get<any>('concur.transactions').filter((t) => t.status === 'available').length
       return n ? `${n} receipts in your inbox haven’t been expensed yet` : null
     },
-    plan: ['Collect the trip receipts from Outlook', 'Create the expense report in Concur', 'Add the 4 Amex card transactions', 'Code each expense to policy (types, attendees, itemization)', 'Submit the report to Priya for approval', 'Let Priya know it’s in her queue'],
+    plan: ['Collect the trip receipts from Outlook', 'Create the expense report in Concur', 'Add the 4 Amex card transactions', { text: 'Code each expense to policy (types, attendees, itemization)', via: 'cua', model: 'large', why: 'Policy judgement — hotel itemization, per-night caps, client-dinner attendees — routed to the large model.' }, 'Submit the report to Priya for approval', 'Let Priya know it’s in her queue'],
     async run(a, inp) {
       a.step(0)
       await a.open('outlook')
@@ -137,7 +137,15 @@ export const workflows: Workflow[] = [
       const n = PENDING_SAP_INVOICES.filter((p) => !db.get<any>('sap.invoices').some((i) => i.supplierId === p.supplierId && i.reference === p.reference)).length
       return n ? `${n} vendor invoices in your inbox are waiting to be posted in SAP` : null
     },
-    plan: ['Read the Fabrikam invoice and its PDF', 'Create the supplier invoice in SAP against PO 4500018234', 'Simulate, balance and post', 'Post the Litware invoice against PO 4500018390', 'Confirm posting and payment dates to the suppliers'],
+    plan: [
+      { text: 'Pull new vendor invoices from the AP inbox', via: 'api', why: 'Microsoft Graph is connected — listing mail and attachments needs no screen.' },
+      { text: 'Read the Fabrikam invoice PDF', via: 'cua', model: 'large', why: 'Free-form supplier PDF with line items and terms — the hardest read in the task, so it goes to the large model.' },
+      { text: 'Fetch the POs and goods receipts from SAP', via: 'api', why: 'SAP OData is read-enabled for this tenant — exact data in milliseconds.' },
+      { text: '3-way match invoice ↔ PO ↔ receipt', via: 'code', why: 'Comparing amounts and quantities is arithmetic — plain code, no model, no guesswork.' },
+      { text: 'Post the Fabrikam invoice against PO 4500018234', via: 'cua', model: 'small', why: 'Invoice posting isn’t exposed by API here, so the agent uses the Fiori app — same path and controls as a person. Routine screens → small model.' },
+      { text: 'Post the Litware invoice against PO 4500018390', via: 'cua', model: 'small', why: 'Same screens as the previous step — the small model handles it.' },
+      { text: 'Confirm payment dates to the suppliers', via: 'cua', model: 'small', why: 'Replies inside the original Outlook threads so suppliers keep the context.' },
+    ],
     async run(a) {
       const posted: Record<string, string> = {}
       const jobs = [
@@ -147,6 +155,13 @@ export const workflows: Workflow[] = [
       const invDate = isoDate(daysAgo(1))
 
       a.step(0)
+      await a.api(
+        "GET /graph/v1.0/me/mailFolders/inbox/messages?$filter=hasAttachments eq true and contains(subject,'Invoice')",
+        () => ['em-invoice-fabrikam', 'em-invoice-litware'].map((id) => db.find<any>('outlook.emails', id)).filter(Boolean),
+        { appId: 'outlook', result: (r) => `${r.length} vendor invoices with PDF attachments: Fabrikam INV-20931, Litware LW-7781` },
+      )
+
+      a.step(1)
       await a.open('outlook')
       await a.waitFor('@outlook-search', 20000)
       await a.click('@outlook-folder-inbox', { label: 'Inbox' })
@@ -156,8 +171,35 @@ export const workflows: Workflow[] = [
       await a.think('INV-20931 from Fabrikam Supplies: $14,250.00 for October facilities services under PO 4500018234 — maintenance $9,500, HVAC visit $3,250, janitorial supplies $1,500. No sales tax; terms Net 30.', 2000)
       await a.close('acrobat')
 
-      let step = 1
+      a.step(2)
+      const pos = await a.api(
+        "GET /sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrder?$filter=PurchaseOrder eq '4500018234' or PurchaseOrder eq '4500018390'&$expand=to_PurchaseOrderItem",
+        () => ['4500018234', '4500018390'].map((id) => db.find<any>('sap.pos', id)).filter(Boolean),
+        { appId: 'sap', result: (r) => `${r.length} purchase orders, ${r.reduce((n: number, p: any) => n + (p.items?.length ?? 0), 0)} line items` },
+      )
+      await a.api(
+        "GET /sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem?$filter=PurchaseOrder in ('4500018234','4500018390')",
+        () => pos,
+        { appId: 'sap', result: () => 'Goods receipts / service entry sheets posted for every PO line' },
+      )
+
+      a.step(3)
+      const invoices = [
+        { ref: 'INV-20931', po: '4500018234', amount: 14250 },
+        { ref: 'LW-7781', po: '4500018390', amount: 3980 },
+      ]
+      await a.code(
+        'match(invoice.gross, po.net, receipt.qty) — tolerance ±0.5%',
+        () => invoices.map((inv) => {
+          const po = pos.find((p: any) => p.id === inv.po)
+          const net = po?.netAmount ?? inv.amount
+          return { ...inv, variance: Math.round((inv.amount - net) * 100) / 100 }
+        }),
+        { result: (r) => `${r.filter((x) => Math.abs(x.variance) < 0.01).length}/${r.length} matched · variance $${r.reduce((n, x) => n + Math.abs(x.variance), 0).toFixed(2)} · no exceptions` },
+      )
+
       for (const j of jobs) {
+        const step = j.supplierId === '10300045' ? 4 : 5
         a.step(step)
         await a.open('sap')
         if (a.exists('@sap-home')) await a.click('@sap-home', { label: 'Home' })
@@ -177,8 +219,7 @@ export const workflows: Workflow[] = [
             : `PO ${j.po}: 20 Analytics Pro licenses × $199.00 = $${po?.netAmount?.toLocaleString('en-US', { minimumFractionDigits: 2 })}. Balance 0.00, terms ${'NT45'} — matches LW-7781.`,
           1600,
         )
-        if (step === 1) {
-          a.step(2)
+        if (step === 4) {
           await a.click('@sap-ci-simulate', { label: 'Simulate' })
           await a.wait(900)
           await a.think('Simulation: credit Fabrikam (vendor 10300045) $14,250.00, debit GR/IR clearing 211100 on three lines. No errors.', 1300)
@@ -190,10 +231,9 @@ export const workflows: Workflow[] = [
         a.log(`Posted supplier invoice ${posted[j.ref]} for ${j.ref}`, 'success')
         await a.click('@sap-ci-display', { label: 'Display Supplier Invoice' })
         await a.wait(900)
-        step = step === 1 ? 3 : 4
       }
 
-      a.step(4)
+      a.step(6)
       const fab = db.get<any>('sap.invoices').find((i) => i.reference === 'INV-20931')
       const lit = db.get<any>('sap.invoices').find((i) => i.reference === 'LW-7781')
       const payFab = longDate(plusDays(daysAgo(1), 30))

@@ -69,7 +69,7 @@ export function TrayFlyout({ onClose }: { onClose: () => void }) {
                 <CircleNotch size={18} className="text-[#430693] animate-spin shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12.5px] font-semibold truncate">{r.name} · {r.title}</div>
-                  <div className="text-[11px] text-[#7A7A87] truncate">{r.plan[Math.max(0, r.planIndex)] ?? 'Starting…'}</div>
+                  <div className="text-[11px] text-[#7A7A87] truncate">{r.plan[Math.max(0, r.planIndex)]?.text ?? 'Starting…'}</div>
                 </div>
                 <button onClick={() => { openAgentWindow(r.id); onClose() }} className="h-7 px-2.5 rounded-full border border-[#E1DDD6] text-[11.5px] font-semibold flex items-center gap-1 hover:bg-[#F7F5F1]"><Eye size={12} /> Watch</button>
               </div>

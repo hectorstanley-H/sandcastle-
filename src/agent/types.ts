@@ -37,6 +37,18 @@ export interface WorkflowResult {
   metrics?: { label: string; value: string }[]
 }
 
+/** How a plan step is executed — shown on the step in the agent window. */
+export interface PlanStep {
+  text: string
+  /** api = direct system call (no screen) · code = deterministic logic · cua = computer use on screen */
+  via: 'api' | 'code' | 'cua'
+  /** model doing the reasoning / driving the screen (default small) */
+  model?: 'small' | 'large'
+  /** one line on why this method was chosen */
+  why?: string
+}
+export type PlanItem = string | PlanStep
+
 export interface Workflow {
   id: string
   title: string
@@ -53,7 +65,7 @@ export interface Workflow {
   examples?: string[]
   inputs?: WorkflowInputField[]
   /** high-level plan shown as a checklist; `agent.step(i)` advances it */
-  plan: string[]
+  plan: PlanItem[]
   run: (agent: AgentAPI, inputs: Record<string, any>) => Promise<WorkflowResult>
   featured?: boolean
   /**
@@ -115,6 +127,13 @@ export interface AgentAPI {
    * the agent pauses and shows an Approve / Reject card; resolves true when approved. No-op (true) otherwise.
    */
   approve(question: string, detail?: string): Promise<boolean>
+  /**
+   * Run a step through a system API instead of the screen: no cursor movement. `fn` does the actual
+   * data access; `call` is the request shown in the activity feed (e.g. 'GET /API_PURCHASEORDER…').
+   */
+  api<T>(call: string, fn: () => T | Promise<T>, opts?: { appId?: string; result?: (r: T) => string; ms?: number }): Promise<T>
+  /** Deterministic code (matching, maths, validation) — no model, no screen. */
+  code<T>(label: string, fn: () => T | Promise<T>, opts?: { result?: (r: T) => string; ms?: number }): Promise<T>
   /** close the app window via its ✕ button */
   close(appId: string): Promise<void>
   /** direct data access when UI-driving isn't practical (use sparingly) */

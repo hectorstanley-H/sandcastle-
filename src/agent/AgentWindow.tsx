@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowSquareOut, CheckCircle, CircleNotch, Pause, Play, Sparkle, Stop, WarningCircle, XCircle, ArrowCounterClockwise, Lightning, ShieldCheck } from '@phosphor-icons/react'
+import { ArrowSquareOut, CheckCircle, CircleNotch, Pause, Play, Sparkle, Stop, WarningCircle, XCircle, ArrowCounterClockwise, ShieldCheck, Cursor, Code, PlugsConnected, Brain } from '@phosphor-icons/react'
 import type { AppProps } from '@/os/registry'
 import { appIcon, getApp, logoUrl } from '@/os/registry'
 import { Desktop } from '@/os/Desktop'
@@ -8,6 +8,88 @@ import { useDesk, useWin } from '@/os/context'
 import { useWM, wm } from '@/os/wm'
 import { cancelRun, useRuns, type Run } from './runs'
 import { AGENT_SCREEN, startRun } from './runtime'
+import { allLargeCost, fmtMs, fmtUsd, MODELS, RATES, stepCost, VIA_STYLE, viaLabel } from './execution'
+import type { PlanStep } from './types'
+import { getWorkflow } from '@/workflows'
+
+const currentStep = (run: Run): PlanStep | undefined => (run.status === 'done' ? undefined : run.plan[run.planIndex])
+
+/** small coloured chip naming how a step runs */
+export function ViaChip({ step, compact }: { step: PlanStep; compact?: boolean }) {
+  const st = VIA_STYLE[step.via]
+  const Icon = step.via === 'api' ? PlugsConnected : step.via === 'code' ? Code : step.model === 'large' ? Brain : Cursor
+  const large = step.via === 'cua' && step.model === 'large'
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full font-semibold whitespace-nowrap ${compact ? 'h-[18px] px-1.5 text-[10px]' : 'h-5 px-2 text-[10.5px]'}`}
+      style={{ background: large ? '#430693' : st.bg, color: large ? '#fff' : st.fg }}
+    >
+      <Icon size={compact ? 10 : 11} weight="bold" />
+      {compact ? (step.via === 'cua' ? `CUA · ${MODELS[step.model ?? 'small'].short}` : st.label) : viaLabel(step)}
+    </span>
+  )
+}
+
+function runCosts(run: Run) {
+  const agent = run.plan.reduce((s, p, i) => s + stepCost(p, run.usage?.[i]), 0)
+  const large = (run.usage ?? []).reduce((s, u) => s + allLargeCost(u), 0)
+  const minutes = parseInt(getWorkflow(run.workflowId)?.timeSaved ?? '20') || 20
+  return { agent, large, person: minutes * RATES.personMinute, minutes }
+}
+
+/** live cost of this run vs. the same run on the large model vs. a person */
+function CostMeter({ run }: { run: Run }) {
+  const c = runCosts(run)
+  const mix = { api: 0, code: 0, cua: 0 } as Record<PlanStep['via'], number>
+  run.plan.forEach((p, i) => { if (i <= run.planIndex || run.status === 'done') mix[p.via]++ })
+  return (
+    <div className="sticky bottom-0 mt-auto shrink-0 px-5 py-3 border-t border-[#EAE5DD] bg-[#FBFAF8]" data-agent="agent-cost-meter">
+      <div className="flex items-center justify-between">
+        <span className="text-[10.5px] tracking-[0.12em] text-[#7A7A87]" style={{ fontFamily: 'var(--font-mono)' }}>COST OF THIS RUN</span>
+        <span className="flex items-center gap-2 text-[10px] text-[#7A7A87]">
+          {(['api', 'code', 'cua'] as const).map((v) => mix[v] > 0 && (
+            <span key={v} className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ background: VIA_STYLE[v].dot }} />{mix[v]} {VIA_STYLE[v].label.toLowerCase()}</span>
+          ))}
+        </span>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <div className="rounded-lg bg-[#430693] text-white px-2.5 py-1.5">
+          <div className="text-[15px] font-bold tabular-nums">{fmtUsd(c.agent)}</div>
+          <div className="text-[10px] text-white/70 leading-tight">H-Worker, mixed</div>
+        </div>
+        <div className="rounded-lg bg-white border border-[#EAE5DD] px-2.5 py-1.5">
+          <div className="text-[15px] font-bold tabular-nums text-[#3A3A44]">{fmtUsd(c.large)}</div>
+          <div className="text-[10px] text-[#7A7A87] leading-tight">all on large model</div>
+        </div>
+        <div className="rounded-lg bg-white border border-[#EAE5DD] px-2.5 py-1.5">
+          <div className="text-[15px] font-bold tabular-nums text-[#3A3A44]">${c.person.toFixed(0)}</div>
+          <div className="text-[10px] text-[#7A7A87] leading-tight">a person, {c.minutes} min</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** shown over the agent's screen while a step runs without the screen (API / code) */
+function OffscreenBanner({ run }: { run: Run }) {
+  const step = currentStep(run)
+  if (!step || step.via === 'cua' || run.status !== 'running') return null
+  const last = [...run.log].reverse().find((l) => l.kind === step.via)
+  const api = step.via === 'api'
+  return (
+    <div className="absolute top-5 left-1/2 -translate-x-1/2 z-10 max-w-[80%] result-in" data-agent="agent-offscreen-banner">
+      <div className="flex items-center gap-3 pl-3 pr-4 py-2.5 rounded-xl shadow-2xl text-white" style={{ background: api ? '#0B5394' : '#0E700E' }}>
+        <span className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+          {api ? <PlugsConnected size={18} weight="bold" /> : <Code size={18} weight="bold" />}
+        </span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-bold">{api ? 'Direct API call — no screen needed' : 'Running deterministic code — no model, no screen'}</div>
+          {last && <div className="text-[11.5px] text-white/80 truncate" style={{ fontFamily: 'var(--font-mono)' }}>{last.text}</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 
 function useElapsed(run?: Run) {
@@ -94,13 +176,14 @@ function ScaledScreen({ run }: { run: Run }) {
         <div className="relative overflow-hidden rounded-[8px] bg-black" style={{ width: AGENT_SCREEN.w * scale, height: AGENT_SCREEN.h * scale }}>
           <div style={{ width: AGENT_SCREEN.w, height: AGENT_SCREEN.h, transform: `scale(${scale})`, transformOrigin: '0 0' }} className="relative">
             <Desktop deskId={run.id} isAgent fixedSize={AGENT_SCREEN} />
-            <AgentCursor run={run} />
+            <div style={{ opacity: currentStep(run) && currentStep(run)!.via !== 'cua' ? 0.35 : 1, transition: 'opacity 300ms' }}><AgentCursor run={run} /></div>
             {run.status === 'booting' && <BootOverlay run={run} />}
             {/* block the user's own mouse from interfering while the agent drives (they can "take over" by pausing) */}
             {run.status === 'running' && <div className="absolute inset-0 z-[99997] cursor-not-allowed" title="H-Worker is in control — pause to take over" />}
           </div>
         </div>
       </div>
+      <OffscreenBanner run={run} />
       <div className="absolute left-4 bottom-3 flex items-center gap-2 text-[11px] text-white/50" style={{ fontFamily: 'var(--font-mono)' }}>
         <ShieldCheck size={13} /> ISOLATED VM · {AGENT_SCREEN.w}×{AGENT_SCREEN.h} · SSO: ALEX.MORGAN@NORTHWIND.COM
       </div>
@@ -142,6 +225,13 @@ function Feed({ run }: { run: Run }) {
             <div key={l.id} className="flex gap-2 py-1 text-[12.5px] text-[#3A3A44] feed-in">
               <Sparkle size={14} weight="fill" className="mt-0.5 shrink-0 text-[#5A0CC0]" />
               <span className="italic leading-snug">{l.text}</span>
+            </div>
+          )
+        if (l.kind === 'api' || l.kind === 'code')
+          return (
+            <div key={l.id} className="flex items-start gap-2 text-[11.5px] feed-in">
+              <span className="mt-[1px] shrink-0 inline-flex items-center h-4 px-1.5 rounded text-[9.5px] font-bold" style={{ background: VIA_STYLE[l.kind].bg, color: VIA_STYLE[l.kind].fg }}>{l.kind === 'api' ? 'API' : 'CODE'}</span>
+              <span className="leading-snug text-[#0F0E12] break-all" style={{ fontFamily: 'var(--font-mono)' }}>{l.text}</span>
             </div>
           )
         if (l.kind === 'error')
@@ -193,7 +283,22 @@ export function PlanList({ run, compact }: { run: Run; compact?: boolean }) {
                 <span className="block w-4 h-4 rounded-full border-[1.5px] border-[#C9C6CF]" />
               )}
             </span>
-            <span>{p}</span>
+            <span className="flex-1 min-w-0">
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>{p.text}</span>
+                {!compact && <ViaChip step={p} />}
+              </span>
+              {!compact && active && p.why && run.status !== 'cancelled' && (
+                <span className="block mt-1 text-[11.5px] font-normal text-[#5A5866] leading-snug">{p.why}</span>
+              )}
+              {!compact && done && run.usage?.[i] && (run.usage[i].ms > 0 || run.usage[i].actions + run.usage[i].apiCalls > 0) && (
+                <span className="block mt-0.5 text-[10.5px] font-normal text-[#9A97A3] tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
+                  {fmtUsd(stepCost(p, run.usage[i]))} · {fmtMs(run.usage[i].ms)}
+                  {p.via === 'cua' ? ` · ${run.usage[i].actions} actions` : p.via === 'api' ? ` · ${run.usage[i].apiCalls} call${run.usage[i].apiCalls === 1 ? '' : 's'}` : ''}
+                </span>
+              )}
+            </span>
+            {compact && <ViaChip step={p} compact />}
           </li>
         )
       })}
@@ -270,7 +375,7 @@ export default function AgentWindow({ params }: AppProps) {
           {narrow && (
             <div className="shrink-0 h-12 flex items-center gap-3 px-4 border-t border-[#EAE5DD] bg-white">
               {run.status === 'done' ? <CheckCircle size={16} weight="fill" className="text-[#0E700E] shrink-0" /> : <CircleNotch size={16} className="text-[#430693] animate-spin shrink-0" />}
-              <span className="text-[12px] font-semibold truncate flex-1">{run.status === 'done' ? run.result?.summary : run.plan[Math.max(0, run.planIndex)] ?? 'Starting…'}</span>
+              <span className="text-[12px] font-semibold truncate flex-1">{run.status === 'done' ? run.result?.summary : run.plan[Math.max(0, run.planIndex)]?.text ?? 'Starting…'}</span>
               <span className="text-[11px] text-[#7A7A87] tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>{pct}%</span>
               {run.status === 'done' && run.result?.outputs[0] && (
                 <button onClick={() => openOnMain(run.result!.outputs[0].appId, run.result!.outputs[0].params)} className="h-7 px-2.5 rounded-full bg-[#0F0E12] text-white text-[11px] font-semibold flex items-center gap-1 shrink-0">
@@ -281,7 +386,7 @@ export default function AgentWindow({ params }: AppProps) {
           )}
         </div>
         {/* side panel */}
-        {!narrow && <aside className="w-[340px] shrink-0 flex flex-col border-l border-[#EAE5DD] bg-white">
+        {!narrow && <aside className={`w-[340px] shrink-0 flex flex-col ${run.status === 'done' ? 'overflow-auto' : ''} border-l border-[#EAE5DD] bg-white`}>
           <div className="px-5 pt-4 pb-3 border-b border-[#EAE5DD]">
             <div className="text-[10.5px] tracking-[0.12em] text-[#7A7A87] mb-1.5" style={{ fontFamily: 'var(--font-mono)' }}>TASK</div>
             <div className="text-[14px] font-bold leading-snug">{run.title}</div>
@@ -293,15 +398,20 @@ export default function AgentWindow({ params }: AppProps) {
               <span className="text-[11px] text-[#7A7A87] tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>{pct}%</span>
             </div>
           </div>
-          <div className="px-5 py-3 border-b border-[#EAE5DD] max-h-[38%] overflow-auto">
+          <div className={`px-5 py-3 border-b border-[#EAE5DD] ${run.status === 'done' ? '' : 'overflow-auto'} ${run.status === 'done' ? 'shrink-0' : 'max-h-[46%]'}`}>
             <div className="text-[10.5px] tracking-[0.12em] text-[#7A7A87] mb-2" style={{ fontFamily: 'var(--font-mono)' }}>PLAN</div>
             <PlanList run={run} />
           </div>
-          <div className="px-5 pt-3 flex items-center justify-between">
-            <span className="text-[10.5px] tracking-[0.12em] text-[#7A7A87]" style={{ fontFamily: 'var(--font-mono)' }}>LIVE ACTIVITY</span>
-            <span className="text-[10.5px] text-[#7A7A87]" style={{ fontFamily: 'var(--font-mono)' }}>{run.log.filter((l) => l.kind === 'action' || l.kind === 'open').length} ACTIONS</span>
-          </div>
-          <Feed run={run} />
+          {run.status !== 'done' && (
+            <>
+              <div className="px-5 pt-3 flex items-center justify-between">
+                <span className="text-[10.5px] tracking-[0.12em] text-[#7A7A87]" style={{ fontFamily: 'var(--font-mono)' }}>LIVE ACTIVITY</span>
+                <span className="text-[10.5px] text-[#7A7A87]" style={{ fontFamily: 'var(--font-mono)' }}>{run.log.filter((l) => l.kind === 'action' || l.kind === 'open').length} ACTIONS</span>
+              </div>
+              <Feed run={run} />
+            </>
+          )}
+          {run.status === 'done' && <div className="h-3 shrink-0" />}
           {run.status === 'awaiting' && run.approval && (
             <div className="m-3 mt-0 p-4 rounded-xl border-2 border-[#430693] bg-[#FBF9FE] result-in" data-agent="agent-approval">
               <div className="flex items-center gap-2 text-[13px] font-bold"><ShieldCheck size={16} weight="fill" className="text-[#430693]" /> Approval needed</div>
@@ -358,11 +468,7 @@ export default function AgentWindow({ params }: AppProps) {
               </button>
             </div>
           )}
-          {live && (
-            <div className="px-5 py-2.5 border-t border-[#EAE5DD] flex items-center gap-2 text-[11px] text-[#7A7A87]">
-              <Lightning size={13} weight="fill" className="text-[#5A0CC0]" /> Powered by Holo · computer-use model
-            </div>
-          )}
+          {(live || run.status === 'done') && <CostMeter run={run} />}
         </aside>}
       </div>
     </div>

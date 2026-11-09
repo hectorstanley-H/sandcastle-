@@ -36,7 +36,7 @@ export const workflows: Workflow[] = [
       const replied = db.get<any>('outlook.emails').some((x) => x.replyTo === 'em-elena-followup')
       return e && !replied ? 'Elena Rossi (Adatum) is waiting on pricing and meeting times' : null
     },
-    plan: ['Read Elena’s email and extract her three asks', 'Check your calendar for free slots next week', 'Draft a reply with pricing, rollout timeline and times', 'Send the reply and keep Liam in copy'],
+    plan: ['Read Elena’s email and extract her three asks', 'Check your calendar for free slots next week', { text: 'Draft a reply with pricing, rollout timeline and times', via: 'cua', model: 'large', why: 'A client-facing reply that has to answer three asks correctly — written by the large model.' }, 'Send the reply and keep Liam in copy'],
     async run(a) {
       a.step(0)
       await a.open('outlook')
