@@ -246,3 +246,19 @@ textarea::placeholder {
 .flash-new {
   animation: flash-highlight 2.2s ease-out;
 }
+
+/* ── Process discovery: recording + graph ── */
+@keyframes rec-dot { 0%, 100% { opacity: 1 } 50% { opacity: 0.25 } }
+.rec-dot { animation: rec-dot 1.1s ease-in-out infinite; box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.25); }
+@keyframes rec-drop { from { transform: translateY(-24px); opacity: 0 } to { transform: none; opacity: 1 } }
+.rec-drop { animation: rec-drop 380ms cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes rec-event { from { transform: translateY(-6px); opacity: 0 } }
+.rec-event { animation: rec-event 260ms ease-out both; }
+@keyframes rec-frame { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }
+.rec-frame { animation: rec-frame 2.4s ease-in-out infinite; }
+@keyframes pg-node { from { transform: translateY(8px) scale(0.96); opacity: 0 } to { transform: none; opacity: 1 } }
+.pg-node { animation: pg-node 420ms cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes pg-edge { from { stroke-dashoffset: 400 } to { stroke-dashoffset: 0 } }
+.pg-edge { stroke-dasharray: 400; animation: pg-edge 700ms ease-out both; }
+@keyframes pg-flow { to { stroke-dashoffset: -20 } }
+.pg-flow { stroke-dasharray: 4 6; animation: pg-flow 900ms linear infinite; }

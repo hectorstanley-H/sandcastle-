@@ -126,19 +126,24 @@ function fire(el: HTMLElement, type: string, init: any = {}) {
   el.dispatchEvent(ev)
 }
 
-export function createAgent(runId: string, inputs: Record<string, any>): AgentAPI {
+/**
+ * `desk` lets an agent drive a desktop other than its own (e.g. the user's main screen when
+ * H-Worker replays an observed operator); `maximize` maximizes each app it opens.
+ */
+export function createAgent(runId: string, inputs: Record<string, any>, opts?: { desk?: string; maximize?: boolean }): AgentAPI {
+  const deskId = opts?.desk ?? runId
   let lastTyped: HTMLElement | null = null
   const run = () => useRuns.getState().runs[runId] as Run
   const speed = () => run()?.speed ?? 1
   const root = () => {
-    const r = rootOf(runId)
+    const r = rootOf(deskId)
     if (!r) throw new Error('Agent desktop not mounted')
     return r
   }
   /** wait (up to 6s) for the agent desktop to be mounted, e.g. after the agent window was re-rendered */
   const ensureRoot = async () => {
     const t0 = Date.now()
-    while (!rootOf(runId)) {
+    while (!rootOf(deskId)) {
       if (cancelFlags.has(runId)) throw new Cancelled()
       if (run()?.host === 'cloud' && Date.now() - t0 > 2500) {
         runs().patch(runId, { host: 'window' })
@@ -265,7 +270,7 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
       await gate()
       await ensureRoot()
       const app = getApp(appId)
-      const desk = wm().desks[runId]
+      const desk = wm().desks[deskId]
       const existing = desk?.windows.find((w) => w.appId === appId)
       if (existing) {
         await api.focus(appId)
@@ -282,21 +287,25 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
         await clickEl(await find(`@start-result-${appId}`))
         runs().addLog(runId, { kind: 'open', text: `Search Start for “${app?.name}” and open it`, appId })
       }
-      if (params) wm().open(runId, appId, params)
+      if (params) wm().open(deskId, appId, params)
       await find(`[data-win-app="${appId}"]`, { timeout: 10000 })
+      if (opts?.maximize) {
+        const w = wm().desks[deskId]?.windows.find((x) => x.appId === appId)
+        if (w && !w.maximized) wm().toggleMax(deskId, w.id)
+      }
       runs().patch(runId, { activeApp: appId })
       // let lazy chunks + app splash settle
       await delay(700)
       hwlog('open', appId)
     },
     async focus(appId) {
-      const desk = wm().desks[runId]
+      const desk = wm().desks[deskId]
       const w = desk?.windows.find((x) => x.appId === appId)
       if (!w) return api.open(appId)
       if (desk.activeId === w.id && !w.minimized) return
       const tb = resolve(root(), `@taskbar-app-${appId}`)[0]
       if (tb) await clickEl(tb)
-      if (wm().desks[runId]?.activeId !== w.id) wm().focus(runId, w.id)
+      if (wm().desks[deskId]?.activeId !== w.id) wm().focus(deskId, w.id)
       runs().patch(runId, { activeApp: appId })
       runs().addLog(runId, { kind: 'open', text: `Switch to ${getApp(appId)?.name ?? appId}`, appId })
       await delay(250)
@@ -410,7 +419,7 @@ export function createAgent(runId: string, inputs: Record<string, any>): AgentAP
       if (el) {
         action(`Close ${getApp(appId)?.name ?? appId}`, appId)
         await clickEl(el)
-      } else wm().closeApp(runId, appId)
+      } else wm().closeApp(deskId, appId)
     },
   }
 

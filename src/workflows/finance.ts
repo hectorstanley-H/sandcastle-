@@ -240,6 +240,9 @@ export const workflows: Workflow[] = [
       const payLit = longDate(plusDays(daysAgo(1), 45))
       await a.think(`Net 30 from the ${new Date(daysAgo(1)).toLocaleDateString('en-US')} invoice date puts Fabrikam’s payment on ${payFab}; Litware (Net 45) on ${payLit}.`, 1300)
       await a.open('outlook')
+      // skip Mike if someone already confirmed (e.g. a person handled Fabrikam while H-Worker observed)
+      const fabDone = !!newestEmail((e) => e.folder === 'sent' && e.replyTo === 'em-invoice-fabrikam')
+      if (!fabDone) {
       await a.click('@outlook-email-em-invoice-fabrikam', { label: 'Invoice INV-20931' })
       await a.click('@outlook-reply', { label: 'Reply' })
       await a.type(
@@ -249,6 +252,7 @@ export const workflows: Workflow[] = [
       )
       await a.click('@outlook-send', { label: 'Send' })
       await a.wait(900)
+      }
       if (lit) {
         await a.click('@outlook-email-em-invoice-litware', { label: 'Litware Inc. — Invoice LW-7781' })
         await a.click('@outlook-reply', { label: 'Reply' })
@@ -258,7 +262,9 @@ export const workflows: Workflow[] = [
       }
       const reply = newestEmail((e) => e.folder === 'sent' && e.replyTo === 'em-invoice-fabrikam')
       return {
-        summary: `Posted ${Object.keys(posted).length || 2} supplier invoices in SAP S/4HANA after a clean 3-way match: Fabrikam INV-20931 ($14,250.00) as ${fab?.id}${lit ? ` and Litware LW-7781 ($3,980.00) as ${lit.id}` : ''}. Confirmed payment dates to both suppliers.`,
+        summary: !posted['INV-20931'] && posted['LW-7781']
+          ? `Posted Litware LW-7781 ($3,980.00) in SAP S/4HANA as ${lit?.id} after a clean 3-way match and confirmed the Net 45 payment date to Sam. Fabrikam INV-20931 had already been posted by a person, so it was skipped.`
+          : `Posted ${Object.keys(posted).length || 2} supplier invoices in SAP S/4HANA after a clean 3-way match: Fabrikam INV-20931 ($14,250.00) as ${fab?.id}${lit ? ` and Litware LW-7781 ($3,980.00) as ${lit.id}` : ''}. Confirmed payment dates to both suppliers.`,
         outputs: [
           { label: `Open supplier invoice ${fab?.id ?? ''} in SAP`, appId: 'sap', params: { invoiceId: fab?.id } },
           ...(lit ? [{ label: `Open supplier invoice ${lit.id} in SAP`, appId: 'sap', params: { invoiceId: lit.id } }] : []),

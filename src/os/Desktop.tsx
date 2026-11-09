@@ -8,6 +8,7 @@ import { StartMenu } from './StartMenu'
 import { AgentWallpaper, BloomWallpaper } from './Wallpaper'
 import { requestReset } from './system'
 import { useDB } from '@/db/db'
+import { RecordingLayer } from './RecordingLayer'
 
 const NONE: never[] = []
 
@@ -181,6 +182,7 @@ export const Desktop = memo(function Desktop({ deskId, isAgent = false, fixedSiz
         <Toasts deskId={deskId} />
         <StartMenu />
         <Taskbar />
+        {deskId === 'main' && <RecordingLayer />}
         {menu && <ContextMenu x={menu.x} y={menu.y} deskId={deskId} onClose={() => setMenu(null)} />}
       </div>
     </DeskContext.Provider>

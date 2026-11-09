@@ -36,7 +36,7 @@ export interface Run {
   result?: WorkflowResult
   error?: string
   /** where the agent's screen is shown: its own window, or a tile in H-Worker › Cloud agents */
-  host?: 'window' | 'cloud'
+  host?: 'window' | 'cloud' | 'observer'
   /** pending human approval */
   approval?: { question: string; detail?: string; answer?: boolean }
 }

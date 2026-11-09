@@ -27,6 +27,7 @@ import {
   UsersThree,
   Exam,
   Cloud,
+  Graph,
 } from '@phosphor-icons/react'
 import type { AppProps } from '@/os/registry'
 import { APPS, appIcon, getApp } from '@/os/registry'
@@ -48,9 +49,10 @@ import { WorkforceView } from './Workforce'
 import { EvalsView } from './Evals'
 import { useFleet } from '@/agent/fleet'
 import { CloudAgentsView } from './CloudAgents'
+import { DiscoveryView } from './discovery/Discovery'
 import { useCloud } from '@/agent/cloud'
 
-type View = 'home' | 'workflows' | 'builder' | 'cloud' | 'workforce' | 'evals' | 'agents' | 'activity' | 'integrations' | 'settings'
+type View = 'home' | 'workflows' | 'discovery' | 'builder' | 'cloud' | 'workforce' | 'evals' | 'agents' | 'activity' | 'integrations' | 'settings'
 
 const greet = () => {
   const h = new Date().getHours()
@@ -276,7 +278,7 @@ function useAllRuns() {
   return useMemo(() => {
     const map = new Map<string, any>()
     hist.forEach((h) => map.set(h.id, h))
-    Object.values(live).forEach((l) => map.set(l.id, { ...map.get(l.id), ...l }))
+    Object.values(live).filter((l) => l.host !== 'observer').forEach((l) => map.set(l.id, { ...map.get(l.id), ...l }))
     return Array.from(map.values()).sort((a, b) => +new Date(b.startedAt) - +new Date(a.startedAt))
   }, [hist, live])
 }
@@ -674,7 +676,7 @@ export default function HWorker({ win, params }: AppProps) {
     if (cloudNonce) setView('cloud')
   }, [cloudNonce])
   const fleetReviews = useFleet((s) => s.fleet?.agents.filter((a) => a.status === 'review').length ?? 0)
-  const liveCount = useRuns((s) => Object.values(s.runs).filter((r) => ['running', 'paused', 'booting', 'awaiting'].includes(r.status)).length)
+  const liveCount = useRuns((s) => Object.values(s.runs).filter((r) => r.host !== 'observer' && ['running', 'paused', 'booting', 'awaiting'].includes(r.status)).length)
 
   useEffect(() => {
     if (params?.view) setView(params.view)
@@ -694,6 +696,7 @@ export default function HWorker({ win, params }: AppProps) {
   const nav: [View, any, string, number?][] = [
     ['home', House, 'Home'],
     ['workflows', SquaresFour, 'Workflows'],
+    ['discovery', Graph, 'Process discovery'],
     ['builder', MagicWand, 'Builder'],
     ['cloud', Cloud, 'Cloud agents', cloudLive],
     ['workforce', UsersThree, 'Workforce', fleetReviews],
@@ -756,6 +759,7 @@ export default function HWorker({ win, params }: AppProps) {
         <main className="flex-1 min-w-0 overflow-auto bg-white" style={{ backgroundImage: view === 'home' ? 'radial-gradient(800px 300px at 100% 0%, rgba(241,236,249,0.9), transparent 70%)' : undefined }}>
           {view === 'home' && <Home onPick={(wf, prompt) => setSheet({ wf, prompt })} focusPrompt={focusPrompt} go={go} />}
           {view === 'workflows' && <WorkflowsView onPick={(wf) => setSheet({ wf })} />}
+          {view === 'discovery' && <DiscoveryView />}
           {view === 'builder' && <BuilderView />}
           {view === 'workforce' && <WorkforceView />}
           {view === 'evals' && <EvalsView />}
