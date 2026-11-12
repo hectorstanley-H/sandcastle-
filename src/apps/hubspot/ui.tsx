@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react'
+import { X } from 'lucide-react'
 import { logoUrl } from '@/os/registry'
 
 export type HRoute =
@@ -12,8 +13,39 @@ export type HRoute =
   | { page: 'sequences' }
   | { page: 'sequence'; id: string }
   | { page: 'emails' }
+  | { page: 'home' }
+  | { page: 'company'; id: string }
+  | { page: 'deal'; id: string }
+  | { page: 'tasks' }
+  | { page: 'tickets' }
+  | { page: 'ticket'; id: string }
+  | { page: 'reports'; tab?: string }
+  | { page: 'inbox'; id?: string }
+  | { page: 'calls' }
+  | { page: 'meetings' }
+  | { page: 'products' }
+  | { page: 'quotes' }
+  | { page: 'quote'; id: string }
+  | { page: 'quote-new'; dealId?: string }
+  | { page: 'workflows' }
+  /** id 'new' opens the builder for a new workflow */
+  | { page: 'workflow'; id: string }
+  | { page: 'forms' }
+  /** id 'new' opens the editor for a new form */
+  | { page: 'form'; id: string }
+  | { page: 'kb' }
+  /** id 'new' opens the editor for a new article */
+  | { page: 'kb-article'; id: string }
+  | { page: 'goals' }
+  | { page: 'properties' }
 
-export const HNav = createContext<{ go: (r: HRoute) => void }>({ go: () => {} })
+export interface HNavCtx {
+  go: (r: HRoute) => void
+  /** show a modal (rendered above everything inside the app window); null closes it */
+  open: (n: ReactNode | null) => void
+  toast: (msg: string) => void
+}
+export const HNav = createContext<HNavCtx>({ go: () => {}, open: () => {}, toast: () => {} })
 export const useHNav = () => useContext(HNav)
 
 export const C = {
@@ -85,3 +117,40 @@ export const hsDate = (iso?: string, time = false) => {
 export const hsMoney = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 
 export const inputH = 'h-9 px-3 rounded-[3px] border border-[#CBD6E2] bg-[#F5F8FA] text-[14px] text-[#33475B] outline-none focus:border-[#00A4BD] focus:bg-white focus:shadow-[0_0_4px_1px_rgba(0,208,228,0.3)]'
+
+export const selectH = `${inputH} pr-8`
+
+export function Modal({ title, onClose, children, footer, width = 560, agent }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; width?: number; agent?: string }) {
+  return (
+    <div className="absolute inset-0 z-50 bg-[#213343]/60 flex items-start justify-center pt-14 overflow-auto" data-agent={agent}>
+      <div className="bg-white rounded-[4px] shadow-2xl overflow-hidden mb-10" style={{ width }}>
+        <div className="h-14 bg-[#33475B] text-white flex items-center px-6 text-[17px] font-medium">
+          {title}
+          <button className="ml-auto" onClick={onClose} aria-label="Close"><X size={20} /></button>
+        </div>
+        <div className="p-6 space-y-4 text-[14px]">{children}</div>
+        {footer && <div className="px-6 py-4 border-t border-[#DFE3EB] flex gap-2 bg-[#F5F8FA]">{footer}</div>}
+      </div>
+    </div>
+  )
+}
+
+export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  return (
+    <label className="block">
+      <span className="block text-[13px] font-semibold mb-1">{label}</span>
+      {children}
+      {hint && <span className="block text-[12px] text-[#516F90] mt-1">{hint}</span>}
+    </label>
+  )
+}
+
+export function Pill({ children, color = '#EAF0F6', text = '#33475B' }: { children: ReactNode; color?: string; text?: string }) {
+  return <span className="inline-flex items-center px-2 h-5 rounded-[3px] text-[12px] font-medium whitespace-nowrap" style={{ background: color, color: text }}>{children}</span>
+}
+
+export const priorityStyle: Record<string, [string, string]> = {
+  High: ['#FDEDEE', '#C93B44'],
+  Medium: ['#FFF4DC', '#9B6A00'],
+  Low: ['#E5F8F6', '#00826F'],
+}

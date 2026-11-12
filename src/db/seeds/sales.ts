@@ -536,6 +536,60 @@ export function seed(): Collections {
     { id: 'seq-renewal', name: 'Renewal — 120 days out', ownerId: 'aisha', createdAt: daysAgo(300), steps: [{ type: 'email', day: 1, subject: 'Your renewal is coming up' }, { type: 'task', day: 3, subject: 'Prep usage report' }, { type: 'call', day: 5, subject: 'Renewal call' }], enrolled: [], stats: { sent: 64, openRate: 72, replyRate: 31, meetings: 12 } },
   ]
 
+  /* ───────────────────────── HubSpot tasks + tickets ───────────────────────── */
+  const hc = (i: number) => hsContacts[i % hsContacts.length]
+  const hsTasks = [
+    ['Call Elena Rossi about Adatum contract redlines', 'Call', 0, 'High', 'alex', 27, 15],
+    ['Send ROI calculator to Benjamin Hall', 'Email', 0, 'Medium', 'alex', 18, 15],
+    ['Follow up on webinar Q&A questions', 'To-do', 1, 'Medium', 'hannah', 8, 3],
+    ['Prep QBR deck for Contoso Ltd', 'To-do', 2, 'High', 'alex', 24, 0],
+    ['LinkedIn: connect with Isla Murphy', 'To-do', 3, 'Low', 'liam', 1, 6],
+    ['Intro call with Yuki Sato', 'Call', 4, 'Medium', 'liam', 5, 14],
+    ['Renewal check-in — Coho Winery', 'Call', 5, 'High', 'aisha', 25, 7],
+    ['Send security questionnaire to Woodgrove', 'Email', 6, 'High', 'alex', 19, 1],
+    ['Update deal notes after pricing call', 'To-do', -1, 'Low', 'alex', 16, 0],
+    ['Book kickoff with Trey Research', 'To-do', 7, 'Medium', 'aisha', 17, 5],
+    ['Review lead scoring for webinar attendees', 'To-do', 2, 'Medium', 'hannah', 3, 9],
+  ].map(([title, type, due, priority, ownerId, ci, di], i) => ({
+    id: `hst-${i + 1}`,
+    title,
+    type,
+    dueDate: daysFromNow(due as number, 10 + (i % 6), 0),
+    priority,
+    status: (due as number) === -1 && i === 8 ? 'Completed' : 'Not started',
+    ownerId,
+    contactId: hc(ci as number).id,
+    dealId: hsDeals[(di as number) % hsDeals.length].id,
+    notes: '',
+    createDate: daysAgo(3 + i),
+  }))
+  const hsTickets = [
+    ['Cannot export shift report to PDF', 'Product issue', 'High', 'New', 25, 'Hi team, the PDF export button spins forever for our weekly shift report. Started happening yesterday.'],
+    ['Question about SSO setup for new subsidiary', 'Billing & account', 'Medium', 'Waiting on us', 26, 'We are onboarding a subsidiary with its own Okta tenant. Can both tenants map to a single workspace?'],
+    ['Invoice shows wrong seat count', 'Billing & account', 'Medium', 'Waiting on contact', 27, 'Our March invoice lists 420 seats; we are contracted for 400.'],
+    ['Feature request: bulk reassign tasks', 'Feature request', 'Low', 'New', 22, 'It would save us a lot of time to reassign dozens of tasks at once when someone leaves.'],
+    ['APAC data residency question', 'Product question', 'Medium', 'Waiting on us', 25, 'Does the Singapore region support full data residency for our operations data?'],
+    ['Login loop on mobile app', 'Product issue', 'High', 'Waiting on us', 23, 'Several of our field staff are stuck in a login loop on Android since the last update.'],
+    ['Renewal paperwork — need W-9', 'Billing & account', 'Low', 'Closed', 21, 'Procurement needs an updated W-9 before they can release the renewal PO.'],
+    ['Onboarding checklist missing step', 'Product question', 'Low', 'Closed', 28, 'The onboarding checklist skips role setup. Is that intentional?'],
+  ].map(([subject, category, priority, status, ci, content], i) => ({
+    id: `hstk-${i + 1}`,
+    number: 4100 + i * 7,
+    subject,
+    category,
+    priority,
+    status,
+    contactId: hc(ci as number).id,
+    ownerId: owners[(i + 1) % owners.length],
+    source: ['Email', 'Chat', 'Form', 'Email'][i % 4],
+    createDate: daysAgo(i + 1, 9 + i, 15),
+    lastUpdated: hoursAgo(3 + i * 7),
+    replies: [
+      { kind: 'customer', by: hc(ci as number).id, body: content, date: daysAgo(i + 1, 9 + i, 15) },
+      ...(status !== 'New' ? [{ kind: 'reply', by: 'ryan', body: 'Thanks for reaching out — looking into this now and I will get back to you shortly.', date: daysAgo(i, 11, 5) }] : []),
+    ],
+  }))
+
   /* ───────────────────────── Zoom ───────────────────────── */
   const P = (id: string) => person(id).email
   const zm = (id: string, topic: string, start: string, durationMins: number, attendees: string[], extra: any = {}) => ({
@@ -657,6 +711,8 @@ export function seed(): Collections {
     'hubspot.deals': hsDeals,
     'hubspot.lists': hsLists,
     'hubspot.sequences': hsSequences,
+    'hubspot.tasks': hsTasks,
+    'hubspot.tickets': hsTickets,
     'zoom.meetings': zoomMeetings,
     'zoom.recordings': zoomRecordings,
     'zoom.chats': zoomChats,
