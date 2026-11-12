@@ -56,6 +56,8 @@ interface PNode {
   label: string
   lane: Lane
   col: number
+  /** second row inside the People lane, so parallel checkpoints can stack */
+  row?: 1
   kind: Kind
   app?: string
   step?: PlanStep
@@ -67,21 +69,31 @@ interface PNode {
   hitl?: { who: string; rule: string; sla: string }
 }
 
+/* Layout: a header strip naming each stage, then one swimlane per system. Columns spread out to fill
+   the available width (SP), and the whole canvas only scales down when even the minimum spacing won't fit. */
+const HEAD = 34
 const LANES: { id: Lane; label: string; sub: string; y: number; h: number }[] = [
-  { id: 'outlook', label: 'Outlook', sub: 'AP inbox', y: 0, h: 112 },
-  { id: 'docs', label: 'Documents', sub: 'Supplier PDFs', y: 112, h: 104 },
-  { id: 'sap', label: 'SAP S/4HANA', sub: 'Company code 1010', y: 216, h: 112 },
-  { id: 'people', label: 'People', sub: 'Human in the loop', y: 328, h: 132 },
+  { id: 'outlook', label: 'Outlook', sub: 'AP inbox', y: HEAD, h: 104 },
+  { id: 'docs', label: 'Documents', sub: 'Supplier PDFs', y: HEAD + 104, h: 96 },
+  { id: 'sap', label: 'SAP S/4HANA', sub: 'Company code 1010', y: HEAD + 200, h: 108 },
+  { id: 'people', label: 'People', sub: 'Human in the loop', y: HEAD + 308, h: 196 },
 ]
-const laneMid = (l: Lane) => {
-  const x = LANES.find((z) => z.id === l)!
-  return x.y + x.h / 2
+const H = HEAD + 504
+const NW = 132
+const NH = 70
+const LANE_COL = 132
+const PAD = 26
+const COLS = 8
+const SP_MIN = 150
+const SP_MAX = 230
+const STAGES_BY_COL = ['Receive', 'Extract', 'Validate', 'Retrieve', 'Match', 'Exceptions', 'Post', 'Notify']
+const canvasW = (sp: number) => LANE_COL + PAD * 2 + NW + (COLS - 1) * sp
+const colX = (c: number, sp: number) => LANE_COL + PAD + NW / 2 + c * sp
+const rowY = (n: { lane: Lane; row?: 1 }) => {
+  const l = LANES.find((z) => z.id === n.lane)!
+  if (n.lane !== 'people') return l.y + l.h / 2
+  return l.y + 18 + NH / 2 + (n.row ? NH + 20 : 0)
 }
-const W = 1280
-const H = 460
-const NW = 128
-const NH = 72
-const colX = (c: number) => 200 + c * 144
 
 const NODES: PNode[] = [
   { id: 'intake', label: 'Invoice email arrives', lane: 'outlook', col: 0, kind: 'start', app: 'outlook', share: 100, human: '0m 40s', agent: 'instant', step: { text: '', via: 'api', why: 'A Microsoft Graph subscription fires on every new mail in the AP inbox — nobody has to watch it.' }, notes: ['Operators triage the shared AP inbox 3× a day — invoices wait 4.2h on average before anyone opens them.'] },
@@ -90,28 +102,36 @@ const NODES: PNode[] = [
   { id: 'dupe', label: 'Duplicate check', lane: 'sap', col: 2, kind: 'task', app: 'sap', share: 100, human: '1m 05s', agent: '0.2s', added: 'Added control', step: { text: '', via: 'code', why: 'Same supplier + reference + amount in the last 18 months — a lookup and a comparison, no model needed.' }, notes: ['Only 2 of 7 operators searched for duplicates. 3 duplicates were paid in the last quarter ($41k recovered late).'] },
   { id: 'po', label: 'Fetch PO + goods receipt', lane: 'sap', col: 3, kind: 'task', app: 'sap', share: 100, human: '1m 50s', agent: '0.4s', step: { text: '', via: 'api', why: 'SAP OData is read-enabled for this tenant — exact PO and receipt data in milliseconds.' }, notes: ['Operators open Manage Purchase Orders and read the lines on screen (you did too).'] },
   { id: 'match', label: '3-way match', lane: 'sap', col: 4, kind: 'decision', app: 'sap', share: 100, human: '1m 20s', agent: '0.1s', step: { text: '', via: 'code', why: 'Comparing amounts and quantities is arithmetic — tolerance ±0.5%, then route by rule.' }, notes: ['Done “by eye” today. Tolerance applied ranged from 0% to 5% depending on the operator.'] },
-  { id: 'buyer', label: 'Ask buyer for goods receipt', lane: 'outlook', col: 5, kind: 'task', app: 'outlook', share: 5, human: '3m 30s', agent: '20s', step: { text: '', via: 'cua', model: 'small', why: 'Email to the requester from the PO, inside the supplier thread.' }, notes: ['Missing receipts sit for 6.5 days on average — reminders are manual today.'] },
+  { id: 'buyer', label: 'Ask buyer for goods receipt', lane: 'outlook', col: 4, kind: 'task', app: 'outlook', share: 5, human: '3m 30s', agent: '20s', step: { text: '', via: 'cua', model: 'small', why: 'Email to the requester from the PO, inside the supplier thread.' }, notes: ['Missing receipts sit for 6.5 days on average — reminders are manual today.'] },
   { id: 'variance', label: 'Approve price variance', lane: 'people', col: 5, kind: 'hitl', share: 12, human: '1.8 days', agent: '—', notes: ['Today approvals go by email and wait 1.8 days on average.'], hitl: { who: 'AP specialist', rule: 'Invoice ≠ PO by more than 0.5%', sla: 'In-app approval · 4h SLA' } },
-  { id: 'controller', label: 'Controller sign-off', lane: 'people', col: 6, kind: 'hitl', share: 7, human: '0.9 days', agent: '—', notes: ['Delegation of authority: invoices above $25,000 need the controller.'], hitl: { who: 'Financial controller', rule: 'Gross amount > $25,000', sla: 'In-app approval · same day' } },
+  { id: 'controller', label: 'Controller sign-off', lane: 'people', col: 5, row: 1, kind: 'hitl', share: 7, human: '0.9 days', agent: '—', notes: ['Delegation of authority: invoices above $25,000 need the controller.'], hitl: { who: 'Financial controller', rule: 'Gross amount > $25,000', sla: 'In-app approval · same day' } },
   { id: 'post', label: 'Post invoice in SAP', lane: 'sap', col: 6, kind: 'task', app: 'sap', share: 98, human: '3m 10s', agent: '35s', step: { text: '', via: 'cua', model: 'small', why: 'Invoice posting isn’t exposed by API here — the agent uses the Fiori app, same screens as a person.' }, notes: ['4 operators skip Simulate before Post; 2 always simulate. The agent always simulates.'] },
   { id: 'confirm', label: 'Confirm payment date', lane: 'outlook', col: 7, kind: 'task', app: 'outlook', share: 98, human: '1m 45s', agent: '15s', step: { text: '', via: 'cua', model: 'small', why: 'Reply in the supplier’s original thread with the posted document and due date.' }, notes: ['Only 61% of suppliers get a confirmation today — the main reason for “where is my payment” emails.'] },
 ]
 
-const EDGES: { from: string; to: string; label?: string; dashed?: boolean }[] = [
-  { from: 'intake', to: 'extract', label: `${OBSERVED + 1}` },
-  { from: 'extract', to: 'dupe', label: '98%' },
-  { from: 'extract', to: 'fraud', label: '2% · new IBAN' },
-  { from: 'fraud', to: 'dupe', label: 'verified', dashed: true },
-  { from: 'dupe', to: 'po' },
-  { from: 'po', to: 'match' },
-  { from: 'match', to: 'post', label: '76% · clean' },
-  { from: 'match', to: 'variance', label: '12% · price' },
-  { from: 'match', to: 'buyer', label: '5% · no GR' },
-  { from: 'buyer', to: 'match', label: 'GR posted', dashed: true },
-  { from: 'match', to: 'controller', label: '7% · > $25k' },
-  { from: 'variance', to: 'post' },
-  { from: 'controller', to: 'post' },
-  { from: 'post', to: 'confirm' },
+/**
+ * route — how the connector is drawn (orthogonal, rounded corners):
+ *   h  straight across          v  straight up/down (dx offsets parallel pairs)
+ *   hv out the right side, then up/down into the target   vh  out the bottom, then right into the target
+ * share — % of cases taking this edge; drives line weight so the main path reads at a glance.
+ */
+type Route = 'h' | 'v' | 'hv' | 'vh'
+interface PEdge { from: string; to: string; share: number; route: Route; label?: string; dashed?: boolean; dx?: number; side?: 'l' | 'r' }
+const EDGES: PEdge[] = [
+  { from: 'intake', to: 'extract', share: 100, route: 'hv', label: `${OBSERVED + 1} cases` },
+  { from: 'extract', to: 'dupe', share: 98, route: 'hv', label: '98%' },
+  { from: 'extract', to: 'fraud', share: 2, route: 'v', label: '2% · new IBAN' },
+  { from: 'fraud', to: 'dupe', share: 2, route: 'hv', label: 'verified', dashed: true },
+  { from: 'dupe', to: 'po', share: 100, route: 'h' },
+  { from: 'po', to: 'match', share: 100, route: 'h' },
+  { from: 'match', to: 'post', share: 76, route: 'h', label: '76% · clean' },
+  { from: 'match', to: 'buyer', share: 5, route: 'v', dx: -18, side: 'l', label: '5% · no GR' },
+  { from: 'buyer', to: 'match', share: 5, route: 'v', dx: 18, side: 'r', label: 'GR posted → re-match', dashed: true },
+  { from: 'match', to: 'variance', share: 12, route: 'vh', label: '12% · price' },
+  { from: 'match', to: 'controller', share: 7, route: 'vh', label: '7% · > $25k' },
+  { from: 'variance', to: 'post', share: 12, route: 'hv', label: 'approved' },
+  { from: 'controller', to: 'post', share: 7, route: 'hv' },
+  { from: 'post', to: 'confirm', share: 98, route: 'hv' },
 ]
 
 const VARIANTS = [
@@ -123,7 +143,7 @@ const VARIANTS = [
 ]
 
 const nodeById = (id: string) => NODES.find((n) => n.id === id)!
-const pos = (n: PNode) => ({ x: colX(n.col), y: laneMid(n.lane) })
+const pos = (n: PNode, sp: number) => ({ x: colX(n.col, sp), y: rowY(n) })
 
 /* ───────────────────────── view ───────────────────────── */
 
@@ -441,106 +461,197 @@ function Legend() {
     <div className="flex items-center gap-3 text-[10.5px] text-[#7A7A87]">
       <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-[3px] border border-[#D8D2C8] bg-white" /> Automated step</span>
       <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-[3px] border border-[#E9C46A] bg-[#FFF8E6]" /> Human checkpoint</span>
+      <span className="flex items-center gap-1">
+        <svg width="20" height="8" aria-hidden><line x1="1" y1="4" x2="19" y2="4" stroke={EDGE_MAIN} strokeWidth="3.5" strokeLinecap="round" /></svg>
+        Thicker = more cases
+      </span>
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#E53935]" /> In your recording</span>
     </div>
   )
 }
 
-function edgePath(a: PNode, b: PNode) {
-  const p = pos(a)
-  const q = pos(b)
-  if (a.col === b.col) {
-    // vertical (same column): bottom/top
-    const up = q.y < p.y
-    const y1 = p.y + (up ? -NH / 2 : NH / 2)
-    const y2 = q.y + (up ? NH / 2 : -NH / 2)
-    return { d: `M ${p.x} ${y1} L ${q.x} ${y2}`, mx: p.x, my: (y1 + y2) / 2 }
+const EDGE_MAIN = '#8E7FB4'
+const EDGE_MINOR = '#BDB2D3'
+const EDGE_HUMAN = '#D9AE3F'
+const EDGE_LIT = '#CDBEF0'
+const EDGE_DIM = '#ECE8E1'
+const MARKERS = { main: EDGE_MAIN, minor: EDGE_MINOR, human: EDGE_HUMAN, lit: '#7114EB', dim: '#E3DED6' }
+
+/** polyline → SVG path with rounded corners */
+function rounded(pts: [number, number][], r = 10) {
+  let d = `M ${pts[0][0]} ${pts[0][1]}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1]
+    const [cx, cy] = pts[i]
+    const [nx, ny] = pts[i + 1]
+    const l1 = Math.hypot(cx - px, cy - py)
+    const l2 = Math.hypot(nx - cx, ny - cy)
+    const k = Math.min(r, l1 / 2, l2 / 2)
+    if (k < 0.5) {
+      d += ` L ${cx} ${cy}`
+      continue
+    }
+    d += ` L ${cx - ((cx - px) / l1) * k} ${cy - ((cy - py) / l1) * k} Q ${cx} ${cy} ${cx + ((nx - cx) / l2) * k} ${cy + ((ny - cy) / l2) * k}`
   }
-  if (b.col < a.col) {
-    // back edge: from source left to target top
-    const x1 = p.x - NW / 2
-    const y2 = q.y - NH / 2
-    return { d: `M ${x1} ${p.y} C ${q.x + 10} ${p.y}, ${q.x} ${p.y + 20}, ${q.x} ${y2}`, mx: (x1 + q.x) / 2 + 14, my: p.y }
+  const [lx, ly] = pts[pts.length - 1]
+  return `${d} L ${lx} ${ly}`
+}
+
+function edgeGeom(e: PEdge, sp: number) {
+  const p = pos(nodeById(e.from), sp)
+  const q = pos(nodeById(e.to), sp)
+  const down = q.y > p.y
+  const exitY = p.y + (down ? NH / 2 : -NH / 2)
+  const enterY = q.y + (down ? -NH / 2 : NH / 2)
+  let pts: [number, number][]
+  let lx: number
+  let ly: number
+  switch (e.route) {
+    case 'h':
+      pts = [[p.x + NW / 2, p.y], [q.x - NW / 2, q.y]]
+      lx = (p.x + q.x) / 2
+      ly = p.y
+      break
+    case 'v': {
+      const dx = e.dx ?? 0
+      pts = [[p.x + dx, exitY], [q.x + dx, enterY]]
+      lx = p.x + dx + (e.side === 'l' ? -8 : e.side === 'r' ? 8 : 0)
+      ly = (exitY + enterY) / 2
+      break
+    }
+    case 'hv':
+      pts = [[p.x + NW / 2, p.y], [q.x, p.y], [q.x, enterY]]
+      lx = (p.x + NW / 2 + q.x) / 2
+      ly = p.y
+      break
+    case 'vh':
+      pts = [[p.x, exitY], [p.x, q.y], [q.x - NW / 2, q.y]]
+      lx = (p.x + q.x - NW / 2) / 2
+      ly = q.y
+      break
   }
-  const x1 = p.x + NW / 2
-  const x2 = q.x - NW / 2
-  const dx = Math.max(30, (x2 - x1) * 0.5)
-  return { d: `M ${x1} ${p.y} C ${x1 + dx} ${p.y}, ${x2 - dx} ${q.y}, ${x2} ${q.y}`, mx: (x1 + x2) / 2, my: (p.y + q.y) / 2 }
+  return { d: rounded(pts), lx, ly }
 }
 
 function Graph({ sel, onSel, highlight, recorded }: { sel: string; onSel: (id: string) => void; highlight?: string[]; recorded: Record<string, CapturedEvent[]> }) {
   const wrap = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(1)
+  const [width, setWidth] = useState(1280)
   useLayoutEffect(() => {
     const el = wrap.current
     if (!el) return
-    const ro = new ResizeObserver(() => setScale(Math.min(1.15, el.clientWidth / W)))
+    setWidth(el.clientWidth)
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+  // spread columns across the available width; only scale down below the minimum spacing
+  const sp = Math.max(SP_MIN, Math.min(SP_MAX, (width - LANE_COL - PAD * 2 - NW) / (COLS - 1)))
+  const scale = Math.min(1, width / canvasW(sp))
+  const innerW = width / scale
+
   const on = (id: string) => !highlight || highlight.includes(id)
-  const edgeOn = (e: { from: string; to: string }) => !highlight || (highlight.includes(e.from) && highlight.includes(e.to) && !(e.from === 'buyer' && e.to === 'match'))
+  const edgeOn = (e: PEdge) => !highlight || (highlight.includes(e.from) && highlight.includes(e.to))
   const order = (n: PNode) => n.col * 90 + (n.lane === 'people' ? 40 : 0)
+  const tone = (e: PEdge): keyof typeof MARKERS => {
+    if (highlight) return edgeOn(e) ? 'lit' : 'dim'
+    if (nodeById(e.to).kind === 'hitl' || nodeById(e.from).kind === 'hitl') return 'human'
+    return e.share >= 50 ? 'main' : 'minor'
+  }
+  const stroke = { main: EDGE_MAIN, minor: EDGE_MINOR, human: EDGE_HUMAN, lit: EDGE_LIT, dim: EDGE_DIM }
+
   return (
-    <div ref={wrap} className="relative bg-[#FCFBF9]" style={{ height: H * scale }}>
-      <div className="absolute left-0 top-0" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: '0 0' }}>
+    <div ref={wrap} className="relative bg-[#FCFBF9] overflow-hidden" style={{ height: H * scale }}>
+      <div className="absolute left-0 top-0" style={{ width: innerW, height: H, transform: `scale(${scale})`, transformOrigin: '0 0' }}>
+        {/* stage header */}
+        <div className="absolute left-0 right-0 top-0 border-b border-[#EFEBE4] bg-white" style={{ height: HEAD }}>
+          {STAGES_BY_COL.map((s, c) => (
+            <div
+              key={s}
+              className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1.5 whitespace-nowrap text-[10px] tracking-[0.12em] uppercase text-[#7A7A87]"
+              style={{ left: colX(c, sp), fontFamily: 'var(--font-mono)' }}
+            >
+              <span className="text-[#B9AFD0] font-bold">{String(c + 1).padStart(2, '0')}</span>
+              {s}
+            </div>
+          ))}
+        </div>
+
         {/* swimlanes */}
         {LANES.map((l, i) => (
           <div key={l.id} className={`absolute left-0 right-0 ${i ? 'border-t border-[#EFEBE4]' : ''} ${l.id === 'people' ? 'bg-[#FFFCF3]' : ''}`} style={{ top: l.y, height: l.h }}>
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 w-[96px]">
-              <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-[#3A3A44]">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2" style={{ width: LANE_COL - 24 }}>
+              <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#3A3A44]">
                 {l.id === 'people' ? <UserCircle size={15} weight="fill" className="text-[#C08A00]" /> : <img src={getApp(l.id === 'docs' ? 'acrobat' : l.id)?.icon} className="w-4 h-4" alt="" />}
                 {l.label}
               </div>
-              <div className="text-[10px] text-[#9A958C] mt-0.5">{l.sub}</div>
+              <div className="text-[10.5px] text-[#9A958C] mt-0.5 leading-tight">{l.sub}</div>
             </div>
           </div>
         ))}
-        <div className="absolute top-0 bottom-0 left-[120px] w-px bg-[#EFEBE4]" />
+        <div className="absolute bottom-0 w-px bg-[#EFEBE4]" style={{ left: LANE_COL, top: HEAD }} />
 
         {/* edges */}
-        <svg className="absolute inset-0" width={W} height={H}>
+        <svg className="absolute inset-0 overflow-visible" width={innerW} height={H}>
           <defs>
-            <marker id="pg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8C7FA8" />
-            </marker>
-            <marker id="pg-arrow-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#E3DED6" />
-            </marker>
+            {Object.entries(MARKERS).map(([k, c]) => (
+              <marker key={k} id={`pg-arrow-${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill={c} />
+              </marker>
+            ))}
           </defs>
           {EDGES.map((e, i) => {
-            const a = nodeById(e.from)
-            const b = nodeById(e.to)
-            const { d } = edgePath(a, b)
-            const lit = edgeOn(e)
+            const { d } = edgeGeom(e, sp)
+            const t = tone(e)
+            const w = 1.4 + (2.6 * e.share) / 100
             return (
               <g key={i}>
-                <path d={d} fill="none" stroke={lit ? '#B7AACB' : '#ECE8E1'} strokeWidth={lit && highlight ? 2.2 : 1.6} strokeDasharray={e.dashed ? '5 5' : undefined} className={e.dashed ? '' : 'pg-edge'} style={{ animationDelay: `${300 + order(a) * 6}ms` }} markerEnd={`url(#${lit ? 'pg-arrow' : 'pg-arrow-dim'})`} />
-                {lit && highlight && !e.dashed && <path d={d} fill="none" stroke="#7114EB" strokeWidth={2} className="pg-flow" />}
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={stroke[t]}
+                  strokeWidth={t === 'dim' ? 1.4 : t === 'lit' ? Math.max(w, 2.6) : w}
+                  strokeDasharray={e.dashed ? '5 5' : undefined}
+                  pathLength={e.dashed ? undefined : 400}
+                  className={e.dashed ? '' : 'pg-edge'}
+                  style={{ animationDelay: `${300 + order(nodeById(e.from)) * 6}ms` }}
+                  markerEnd={`url(#pg-arrow-${t})`}
+                />
+                {t === 'lit' && !e.dashed && <path d={d} fill="none" stroke="#7114EB" strokeWidth={2} className="pg-flow" />}
               </g>
             )
           })}
         </svg>
+
         {/* edge labels */}
         {EDGES.filter((e) => e.label).map((e, i) => {
-          const { mx, my } = edgePath(nodeById(e.from), nodeById(e.to))
+          const { lx, ly } = edgeGeom(e, sp)
+          const t = tone(e)
+          const lit = edgeOn(e)
+          const anchor = e.side === 'l' ? '-translate-x-full' : e.side === 'r' ? '' : '-translate-x-1/2'
           return (
-            <div key={i} className={`absolute -translate-x-1/2 -translate-y-1/2 h-[18px] px-1.5 rounded-full bg-white border text-[10px] font-semibold whitespace-nowrap pg-node transition-opacity ${edgeOn(e) ? 'border-[#E4DDF0] text-[#5A4B78]' : 'border-[#F1EEE9] text-[#C9C3BA] opacity-60'}`} style={{ left: mx, top: my, animationDelay: `${900 + i * 40}ms` }}>
+            <div
+              key={i}
+              className={`absolute ${anchor} -translate-y-1/2 h-[18px] px-1.5 flex items-center rounded-full border text-[10px] font-semibold whitespace-nowrap pg-node transition-opacity ${
+                !lit ? 'bg-white border-[#F1EEE9] text-[#C9C3BA] opacity-60' : t === 'human' ? 'bg-[#FFFCF3] border-[#F0DDA8] text-[#7A5A00]' : 'bg-white border-[#E4DDF0] text-[#5A4B78]'
+              }`}
+              style={{ left: lx, top: ly, animationDelay: `${900 + i * 40}ms` }}
+            >
               {e.label}
             </div>
           )
         })}
+
         {/* nodes */}
         {NODES.map((n) => (
-          <GraphNode key={n.id} n={n} sel={sel === n.id} dim={!on(n.id)} rec={recorded[n.id]?.length ?? 0} onClick={() => onSel(n.id)} delay={150 + order(n) * 6} />
+          <GraphNode key={n.id} n={n} sp={sp} sel={sel === n.id} dim={!on(n.id)} rec={recorded[n.id]?.length ?? 0} onClick={() => onSel(n.id)} delay={150 + order(n) * 6} />
         ))}
       </div>
     </div>
   )
 }
 
-function GraphNode({ n, sel, dim, rec, onClick, delay }: { n: PNode; sel: boolean; dim: boolean; rec: number; onClick: () => void; delay: number }) {
-  const { x, y } = pos(n)
+function GraphNode({ n, sp, sel, dim, rec, onClick, delay }: { n: PNode; sp: number; sel: boolean; dim: boolean; rec: number; onClick: () => void; delay: number }) {
+  const { x, y } = pos(n, sp)
   const hitl = n.kind === 'hitl'
   const decision = n.kind === 'decision'
   const app = n.app ? getApp(n.app) : undefined
@@ -561,12 +672,16 @@ function GraphNode({ n, sel, dim, rec, onClick, delay }: { n: PNode; sel: boolea
         ) : n.step ? (
           <ViaChip step={n.step} compact />
         ) : null}
+        {n.added && (
+          <span className="h-[17px] px-1.5 rounded-full bg-[#E7F4E7] text-[#0E700E] text-[9.5px] font-bold flex items-center gap-0.5" title={n.added}>
+            <Plus size={8} weight="bold" /> New
+          </span>
+        )}
         <span className="flex-1" />
+        {rec > 0 && <span className="w-[7px] h-[7px] rounded-full bg-[#E53935] shrink-0" title={`${rec} events in your recording`} />}
         {app && !hitl && <img src={app.icon} className="w-3.5 h-3.5" alt="" />}
       </div>
-      <div className="mt-1 text-[11.5px] font-bold leading-[1.2] line-clamp-2 text-[#0F0E12]">{n.label}</div>
-      {rec > 0 && <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#E53935] ring-2 ring-white" title={`${rec} events in your recording`} />}
-      {n.added && <span className="absolute -bottom-2 left-2 h-4 px-1.5 rounded-full bg-[#0E700E] text-white text-[9px] font-bold flex items-center gap-0.5"><Plus size={8} weight="bold" /> {n.added}</span>}
+      <div className="mt-1 text-[12px] font-bold leading-[1.2] line-clamp-2 text-[#0F0E12]">{n.label}</div>
     </button>
   )
 }
