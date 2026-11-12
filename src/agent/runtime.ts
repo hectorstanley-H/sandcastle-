@@ -288,7 +288,10 @@ export function createAgent(runId: string, inputs: Record<string, any>, opts?: {
         runs().addLog(runId, { kind: 'open', text: `Search Start for “${app?.name}” and open it`, appId })
       }
       if (params) wm().open(deskId, appId, params)
-      await find(`[data-win-app="${appId}"]`, { timeout: 10000 })
+      const winEl = await find(`[data-win-app="${appId}"]`, { timeout: 10000 })
+      // the window frame appears before the app's lazy chunk has loaded; wait for the splash to go
+      // (a cold dev-server page can take well over the 8s click timeout for big apps)
+      for (const t0 = Date.now(); winEl.querySelector('[data-app-splash]') && Date.now() - t0 < 45_000; ) await sleep(100)
       if (opts?.maximize) {
         const w = wm().desks[deskId]?.windows.find((x) => x.appId === appId)
         if (w && !w.maximized) wm().toggleMax(deskId, w.id)

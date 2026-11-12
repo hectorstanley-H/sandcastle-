@@ -154,7 +154,7 @@ function BrowserChrome({ win }: { win: Win }) {
 function AppSplash({ appId }: { appId: string }) {
   const app = getApp(appId)
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-white">
+    <div className="absolute inset-0 flex items-center justify-center bg-white" data-app-splash>
       <img src={app?.icon} className="w-16 h-16 animate-pulse" alt="" />
     </div>
   )
