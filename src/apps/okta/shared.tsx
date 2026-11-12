@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { db, uid, type Rec } from '@/db/db'
+import { db, uid, useCollection, type Rec } from '@/db/db'
 import { logoUrl } from '@/os/registry'
 import { ME } from '@/data/people'
 
@@ -60,8 +60,13 @@ export interface OktaLog extends Rec {
 
 export type Route = {
   area: 'home' | 'admin'
-  page: 'dashboard' | 'people' | 'user' | 'groups' | 'apps' | 'logs' | 'profiles' | 'integrations' | 'security' | 'workflow' | 'customizations' | 'settings' | 'selfservice' | 'tasks'
+  page:
+    | 'dashboard' | 'people' | 'user' | 'groups' | 'apps' | 'logs' | 'profiles' | 'integrations' | 'security' | 'workflow' | 'customizations' | 'settings' | 'selfservice' | 'tasks'
+    | 'group' | 'app' | 'devices' | 'policies' | 'gsp' | 'networks' | 'admins' | 'reports' | 'agents' | 'notifications' | 'gettingstarted' | 'sources'
+    | 'enduser-settings' | 'custom-other' | 'api' | 'security-general' | 'profile-enrollment' | 'itp' | 'hooks' | 'wfconsole' | 'insights' | 'features' | 'downloads'
   userId?: string
+  groupId?: string
+  appId?: string
   tab?: string
 }
 
@@ -195,3 +200,59 @@ export function fmtOktaTime(iso?: string) {
 
 /** true for records created in the last few seconds (flash-new) */
 export const isFresh = (iso?: string) => !!iso && Date.now() - new Date(iso).getTime() < 8000
+
+/** persisted key/value settings record in okta.settings (falls back to defaults until changed) */
+export function useOktaSetting<T extends Record<string, any>>(id: string, defaults: T): [T, (patch: Partial<T>) => void] {
+  const rec = useCollection<any>('okta.settings').find((r) => r.id === id)
+  const values = { ...defaults, ...(rec?.values ?? {}) } as T
+  const set = (patch: Partial<T>) => db.upsert('okta.settings', { id, values: { ...values, ...patch } })
+  return [values, set]
+}
+
+/** Okta-style toggle switch */
+export function Toggle({ on, onChange, label, agent }: { on: boolean; onChange: (v: boolean) => void; label: string; agent?: string }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} data-agent={agent} onClick={() => onChange(!on)} className={`w-10 h-[22px] rounded-full relative shrink-0 transition-colors ${on ? 'bg-[#1662DD]' : 'bg-[#C8C8CE]'}`}>
+      <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-[21px]' : 'left-[3px]'}`} />
+    </button>
+  )
+}
+
+/** green confirmation banner used after admin actions */
+export function Notice({ text, onClose }: { text: string; onClose: () => void }) {
+  return (
+    <div className="flash-new flex items-center gap-2 rounded-md bg-[#E6F4EA] border border-[#B7DEC1] px-4 py-2.5 text-[14px] text-[#1B6E31]">
+      <span className="flex-1">{text}</span>
+      <button aria-label="Dismiss" onClick={onClose} className="text-[16px] leading-none px-1">
+        ×
+      </button>
+    </div>
+  )
+}
+
+/** small dropdown menu with a click-away layer */
+export function Menu({ items, onClose, className = '' }: { items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[]; onClose: () => void; className?: string }) {
+  return (
+    <>
+      <div className="fixed inset-0 z-20" onMouseDown={onClose} />
+      <div className={`absolute z-30 w-60 bg-white rounded-md border border-[#E1E1E6] shadow-[0_8px_24px_rgba(29,29,33,0.16)] py-1 text-[14px] ${className}`}>
+        {items.map((x) => (
+          <button
+            key={x.label}
+            role="menuitem"
+            disabled={x.disabled}
+            onClick={() => {
+              onClose()
+              x.onClick()
+            }}
+            className={`w-full text-left px-4 h-9 hover:bg-[#F4F4F4] disabled:text-[#A0A0A8] disabled:hover:bg-white ${x.danger ? 'text-[#DA372C]' : ''}`}
+          >
+            {x.label}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
+export const inputCls = 'h-9 w-full rounded-[4px] border border-[#8C8C96] px-3 text-[14px] outline-none focus:border-[#1662DD] focus:shadow-[0_0_0_2px_#C4D7F7] bg-white'

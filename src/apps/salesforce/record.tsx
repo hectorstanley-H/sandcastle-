@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown, ChevronRight, CircleCheck, Pencil, Plus, X } from 'lucide-react'
-import { Btn, BtnGroup, ObjIcon, inputCls } from './ui'
+import { db, useCollection } from '@/db/db'
+import { useDesk } from '@/os/context'
+import { Avatar } from '@/components/Avatar'
+import { person } from '@/data/people'
+import { Btn, BtnGroup, MenuButton, ObjIcon, inputCls, type MenuItem } from './ui'
 
 /* ───────────── toast ───────────── */
 export function useToast() {
@@ -65,6 +69,7 @@ export function Path({
   closedLabel = 'Closed',
   guidance,
   keyFields,
+  onEditKeyFields,
 }: {
   stages: string[]
   current: string
@@ -74,6 +79,7 @@ export function Path({
   closedLabel?: string
   guidance?: ReactNode
   keyFields?: ReactNode
+  onEditKeyFields?: () => void
 }) {
   const all = [...stages, closedLabel]
   const curIdx = closedWon || closedLost ? all.length - 1 : all.indexOf(current)
@@ -154,7 +160,7 @@ export function Path({
           </Btn>
         )}
         {done && (
-          <Btn variant="neutral" className="shrink-0 min-w-[210px]">
+          <Btn variant="neutral" className="shrink-0 min-w-[210px]" onClick={() => onAction(closedLabel, 'closed')}>
             Change Closed Stage
           </Btn>
         )}
@@ -164,7 +170,7 @@ export function Path({
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-[14px] font-bold">Key Fields</h3>
-              <button className="text-[13px] text-[#0176D3]">Edit</button>
+              <button className="text-[13px] text-[#0176D3] hover:underline" onClick={onEditKeyFields}>Edit</button>
             </div>
             {keyFields}
           </div>
@@ -179,7 +185,14 @@ export function Path({
 }
 
 /* ───────────── highlights ───────────── */
-export function Highlights({ object, title, fields, actions, badge }: { object: string; title: string; fields: [string, ReactNode][]; actions: { label: string; agent?: string; onClick?: () => void }[]; badge?: ReactNode }) {
+export function Highlights({ object, title, fields, actions, badge, recordId, more }: { object: string; title: string; fields: [string, ReactNode][]; actions: { label: string; agent?: string; onClick?: () => void }[]; badge?: ReactNode; recordId?: string; more?: MenuItem[] }) {
+  const follows = useCollection<any>('salesforce.follows')
+  const following = !!recordId && follows.some((f) => f.id === recordId)
+  const toggleFollow = () => {
+    if (!recordId) return
+    if (following) db.remove('salesforce.follows', recordId)
+    else db.insert('salesforce.follows', { id: recordId, object, name: title, date: new Date().toISOString() })
+  }
   return (
     <div className="bg-white rounded-[4px] border border-[#C9C9C9]" style={{ boxShadow: '0 2px 2px 0 rgba(0,0,0,0.10)' }}>
       <div className="flex items-start gap-3 px-4 pt-3 pb-3">
@@ -190,10 +203,10 @@ export function Highlights({ object, title, fields, actions, badge }: { object: 
             {title} {badge}
           </h1>
         </div>
-        <Btn className="px-3" icon={<Plus size={14} />}>
-          Follow
+        <Btn className="px-3" icon={following ? <Check size={14} strokeWidth={3} /> : <Plus size={14} />} onClick={toggleFollow}>
+          {following ? 'Following' : 'Follow'}
         </Btn>
-        <BtnGroup items={actions} />
+        <BtnGroup items={actions} more={more} />
       </div>
       <div className="flex gap-12 px-4 pb-3 pt-1">
         {fields.map(([l, v]) => (
@@ -304,22 +317,33 @@ export function TabsCard({ tabs, active, setActive, children, prefix }: { tabs: 
   )
 }
 
-export function RelatedCard({ icon, title, count, children, agent }: { icon: string; title: string; count: number; children?: ReactNode; agent?: string }) {
+export function RelatedCard({ icon, title, count, children, agent, onNew, newLabel = 'New', menu }: { icon: string; title: string; count: number; children?: ReactNode; agent?: string; onNew?: () => void; newLabel?: string; menu?: MenuItem[] }) {
+  const [all, setAll] = useState(false)
+  const items: MenuItem[] = [...(onNew ? [{ label: newLabel, onClick: onNew }] : []), ...(menu ?? []), { label: 'View All', disabled: !count, onClick: () => setAll(true) }]
   return (
-    <section data-agent={agent} className="bg-[#F3F3F3]/0 rounded-[4px] border border-[#C9C9C9] bg-white" style={{ boxShadow: '0 2px 2px 0 rgba(0,0,0,0.10)' }}>
+    <section data-agent={agent} data-rel={title} className="bg-[#F3F3F3]/0 rounded-[4px] border border-[#C9C9C9] bg-white" style={{ boxShadow: '0 2px 2px 0 rgba(0,0,0,0.10)' }}>
       <header className="flex items-center gap-3 px-3 py-2.5">
         <ObjIcon type={icon} size={24} />
         <h2 className="flex-1 text-[14px] font-bold truncate">
-          <span className="hover:underline cursor-pointer">
+          <span className="hover:underline cursor-pointer" onClick={() => count && setAll(true)}>
             {title} ({count > 6 ? '6+' : count})
           </span>
         </h2>
-        <button className="w-6 h-6 border border-[#C9C9C9] rounded-[4px] flex items-center justify-center text-[#747474]">
+        <MenuButton label={`${title} actions`} className="w-6 h-6 border border-[#C9C9C9] rounded-[4px] flex items-center justify-center text-[#747474] hover:bg-[#F3F3F3]" menuClass="right-0 top-7" width={170} items={items}>
           <ChevronDown size={12} />
-        </button>
+        </MenuButton>
       </header>
       {count > 0 && <div className="px-3 pb-2">{children}</div>}
-      {count > 0 && <footer className="border-t border-[#E5E5E5] h-9 flex items-center justify-center text-[13px] text-[#0176D3] hover:underline cursor-pointer">View All</footer>}
+      {count > 0 && (
+        <footer onClick={() => setAll(true)} className="border-t border-[#E5E5E5] h-9 flex items-center justify-center text-[13px] text-[#0176D3] hover:underline cursor-pointer">
+          View All
+        </footer>
+      )}
+      {all && (
+        <Modal title={`${title} (${count})`} width={720} onClose={() => setAll(false)} footer={<>{onNew && <Btn onClick={() => { setAll(false); onNew() }}>{newLabel}</Btn>}<Btn variant="brand" onClick={() => setAll(false)}>Close</Btn></>}>
+          <div className="px-5 py-3">{children}</div>
+        </Modal>
+      )}
     </section>
   )
 }
@@ -336,5 +360,43 @@ export function Modal({ title, children, footer, onClose, width = 640, agent }: 
         <div className="bg-[#F3F3F3] rounded-b-[4px] border-t border-[#E5E5E5] px-4 py-3 flex justify-end gap-2">{footer}</div>
       </div>
     </div>
+  )
+}
+
+/* ───────────── user hover card (opens on click) ───────────── */
+export function PersonLink({ id, className = '' }: { id: string; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const { open: openApp } = useDesk()
+  const p = person(id)
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className={`text-[#0176D3] hover:underline text-left ${className}`}>
+        {p.name}
+      </button>
+      {open && (
+        <Modal
+          title={p.name}
+          width={460}
+          onClose={() => setOpen(false)}
+          footer={
+            <>
+              <Btn onClick={() => { setOpen(false); openApp('outlook', { compose: { to: [p.email] } }) }}>Send Email</Btn>
+              <Btn variant="brand" onClick={() => setOpen(false)}>Close</Btn>
+            </>
+          }
+        >
+          <div className="p-5 flex gap-4 text-[13px]">
+            <Avatar id={id} size={56} />
+            <div className="space-y-0.5">
+              <div className="text-[16px] font-bold">{p.name}</div>
+              <div className="text-[#444]">{p.title}</div>
+              <div>{p.email}</div>
+              <div>{p.phone}</div>
+              <div className="text-[#444]">{p.location}</div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   )
 }

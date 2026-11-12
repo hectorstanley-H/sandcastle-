@@ -14,6 +14,7 @@ import { MyTeam, WorkerProfile, SearchResults } from './Team'
 import { InboxPage } from './Inbox'
 import { HirePage } from './Hire'
 import { PayPage, BenefitsPage, PerformancePage, AllApps } from './Other'
+import { ExpensesPage, LearningPage, CareerPage, GoalsPage, FeedbackPage, DirectoryPage, HelpPage } from './More'
 
 export type Page =
   | 'home'
@@ -30,6 +31,13 @@ export type Page =
   | 'performance'
   | 'apps'
   | 'search'
+  | 'expenses'
+  | 'learning'
+  | 'career'
+  | 'goals'
+  | 'feedback'
+  | 'directory'
+  | 'help'
 
 export interface Route {
   page: Page
@@ -57,6 +65,13 @@ const TITLES: Record<Page, string> = {
   performance: 'Team Performance - Workday',
   apps: 'Apps - Workday',
   search: 'Search Results - Workday',
+  expenses: 'Expenses - Workday',
+  learning: 'Learning - Workday',
+  career: 'Career - Workday',
+  goals: 'Goals - Workday',
+  feedback: 'Feedback - Workday',
+  directory: 'Directory - Workday',
+  help: 'Help - Workday',
 }
 
 const URLS: Record<Page, string> = {
@@ -74,6 +89,13 @@ const URLS: Record<Page, string> = {
   performance: 'd/task/2998$22.htmld',
   apps: 'd/apps.htmld',
   search: 'd/search.htmld',
+  expenses: 'd/task/2997$32.htmld',
+  learning: 'd/task/2998$41.htmld',
+  career: 'd/task/2998$57.htmld',
+  goals: 'd/task/2997$61.htmld',
+  feedback: 'd/task/2997$66.htmld',
+  directory: 'd/task/2998$70.htmld',
+  help: 'd/task/2998$90.htmld',
 }
 
 function routeFromParams(p: any): Route | null {
@@ -92,6 +114,9 @@ export default function Workday({ win, params }: AppProps) {
   const [route, setRoute] = useState<Route>(() => routeFromParams(params) ?? { page: 'home' })
   const [q, setQ] = useState('')
   const [notifOpen, setNotifOpen] = useState(false)
+  const [assistOpen, setAssistOpen] = useState(false)
+  const [assistQ, setAssistQ] = useState('')
+  const [readIds, setReadIds] = useState<string[]>([])
   const epoch = useDB((s) => s.epoch)
   const tasks = useCollection<any>('workday.tasks')
   const myOpen = tasks.filter((t) => t.assignee === ME.id && t.status === 'open')
@@ -115,17 +140,20 @@ export default function Workday({ win, params }: AppProps) {
   const nav: Nav = (r) => {
     setRoute(r)
     setNotifOpen(false)
+    setAssistOpen(false)
   }
 
   const notifications = useMemo(
     () => [
-      { id: 'n1', text: 'Your Time Off request for August has been approved by Priya Raman', at: '2026-06-18T18:30:00.000Z' },
-      { id: 'n2', text: 'Jordan Ellis accepted the offer for Operations Analyst', at: new Date(Date.now() - 4 * 864e5).toISOString() },
-      { id: 'n3', text: 'Open Enrollment closes Friday at 11:59 PM ET', at: new Date(Date.now() - 6 * 864e5).toISOString() },
-      { id: 'n4', text: 'Your payslip for October 15 is available', at: new Date(Date.now() - 6 * 864e5).toISOString() },
+      { id: 'n1', text: 'Your Time Off request for August has been approved by Priya Raman', at: '2026-06-18T18:30:00.000Z', to: { page: 'timeoff' } as Route },
+      { id: 'n2', text: 'Jordan Ellis accepted the offer for Operations Analyst', at: new Date(Date.now() - 4 * 864e5).toISOString(), to: { page: 'onboarding', workerId: 'wd-jordan' } as Route },
+      { id: 'n3', text: 'Open Enrollment closes Friday at 11:59 PM ET', at: new Date(Date.now() - 6 * 864e5).toISOString(), to: { page: 'benefits' } as Route },
+      { id: 'n4', text: 'Your payslip for October 15 is available', at: new Date(Date.now() - 6 * 864e5).toISOString(), to: { page: 'pay' } as Route },
     ],
     [],
   )
+
+  const unread = notifications.filter((n) => !readIds.includes(n.id)).length
 
   return (
     <div key={epoch} className="flex-1 min-h-0 flex flex-col bg-[#F6F7F8] relative" style={{ fontFamily: WD.font, color: WD.text }}>
@@ -158,12 +186,27 @@ export default function Workday({ win, params }: AppProps) {
             )}
           </div>
         </div>
-        <button aria-label="Workday Assistant" className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#F0F1F2] text-[#5E6A75]">
+        <button
+          aria-label="Workday Assistant"
+          onClick={() => {
+            setAssistOpen((o) => !o)
+            setNotifOpen(false)
+          }}
+          className={`w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#F0F1F2] ${assistOpen ? 'bg-[#D7EAFC] text-[#005CB9]' : 'text-[#5E6A75]'}`}
+        >
           <Sparkles size={20} />
         </button>
-        <button data-agent="workday-notifications" aria-label="Notifications" onClick={() => setNotifOpen((o) => !o)} className="relative w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#F0F1F2] text-[#5E6A75]">
+        <button
+          data-agent="workday-notifications"
+          aria-label="Notifications"
+          onClick={() => {
+            setNotifOpen((o) => !o)
+            setAssistOpen(false)
+          }}
+          className="relative w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#F0F1F2] text-[#5E6A75]"
+        >
           <Bell size={20} />
-          <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#DE2E21] text-white text-[11px] font-bold flex items-center justify-center">4</span>
+          {unread > 0 && <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#DE2E21] text-white text-[11px] font-bold flex items-center justify-center">{unread}</span>}
         </button>
         <button data-agent="workday-inbox" aria-label="My Tasks" onClick={() => nav({ page: 'inbox' })} className="relative w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#F0F1F2] text-[#5E6A75]">
           <Inbox size={20} />
@@ -174,20 +217,66 @@ export default function Workday({ win, params }: AppProps) {
         </button>
         {notifOpen && (
           <div className="absolute right-20 top-14 w-[380px] bg-white rounded-xl shadow-[0_8px_28px_rgba(0,0,0,0.18)] border border-[#E8EBED] py-2">
-            <div className="px-4 py-2 text-[16px] font-bold">Notifications</div>
-            {notifications.map((n) => (
-              <div key={n.id} className="px-4 py-2.5 hover:bg-[#F6F7F8] flex gap-3">
-                <span className="mt-1.5 w-2 h-2 rounded-full bg-[#0875E1] shrink-0" />
-                <div>
-                  <div className="text-[13.5px] leading-snug">{n.text}</div>
-                  <div className="text-[12px] text-[#5E6A75] mt-0.5">{relative(n.at)}</div>
-                </div>
-              </div>
-            ))}
+            <div className="px-4 py-2 flex items-center">
+              <span className="text-[16px] font-bold flex-1">Notifications</span>
+              <button disabled={!unread} onClick={() => setReadIds(notifications.map((n) => n.id))} className="text-[13px] font-bold text-[#0875E1] hover:underline disabled:text-[#A1AAB3] disabled:no-underline">
+                Mark All as Read
+              </button>
+            </div>
+            {notifications.map((n) => {
+              const read = readIds.includes(n.id)
+              return (
+                <button
+                  key={n.id}
+                  data-agent={`workday-notification-${n.id}`}
+                  onClick={() => {
+                    setReadIds((r) => (r.includes(n.id) ? r : [...r, n.id]))
+                    nav(n.to)
+                  }}
+                  className="w-full text-left px-4 py-2.5 hover:bg-[#F6F7F8] flex gap-3"
+                >
+                  <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${read ? 'bg-transparent' : 'bg-[#0875E1]'}`} />
+                  <div>
+                    <div className={`text-[13.5px] leading-snug ${read ? 'text-[#5E6A75]' : ''}`}>{n.text}</div>
+                    <div className="text-[12px] text-[#5E6A75] mt-0.5">{relative(n.at)}</div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {assistOpen && (
+          <div className="absolute right-32 top-14 w-[400px] bg-white rounded-xl shadow-[0_8px_28px_rgba(0,0,0,0.18)] border border-[#E8EBED] p-4" data-agent="workday-assistant">
+            <div className="flex items-center gap-2 text-[16px] font-bold">
+              <Sparkles size={18} className="text-[#0875E1]" /> Workday Assistant
+            </div>
+            <div className="text-[13px] text-[#5E6A75] mt-1">Hi {ME.first}, what can I help you with?</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {ASSIST.map(([label, r]) => (
+                <button key={label} onClick={() => nav(r)} className="h-8 px-3 rounded-full border border-[#A1AAB3] text-[13px] font-bold hover:bg-[#F0F1F2]">
+                  {label}
+                </button>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                const t = assistQ.trim()
+                if (!t) return
+                setAssistQ('')
+                nav(assistRoute(t))
+              }}
+              className="mt-3 flex items-center gap-2 h-10 rounded-full border border-[#A1AAB3] px-4 focus-within:border-[#0875E1]"
+            >
+              <input aria-label="Ask Workday Assistant" value={assistQ} onChange={(e) => setAssistQ(e.target.value)} placeholder="Ask about time off, pay, benefits…" className="flex-1 outline-none text-[14px] bg-transparent" />
+            </form>
           </div>
         )}
       </header>
-      <main className="flex-1 min-h-0 overflow-auto" data-agent="workday-main" onMouseDown={() => notifOpen && setNotifOpen(false)}>
+      <main className="flex-1 min-h-0 overflow-auto" data-agent="workday-main" onMouseDown={() => {
+          if (notifOpen) setNotifOpen(false)
+          if (assistOpen) setAssistOpen(false)
+        }}>
         {route.page === 'home' && <Home nav={nav} />}
         {route.page === 'timeoff' && <TimeOffHub nav={nav} />}
         {route.page === 'timeoff-request' && <RequestTimeOff nav={nav} />}
@@ -202,9 +291,44 @@ export default function Workday({ win, params }: AppProps) {
         {route.page === 'performance' && <PerformancePage nav={nav} />}
         {route.page === 'apps' && <AllApps nav={nav} />}
         {route.page === 'search' && <SearchResults nav={nav} q={route.q ?? ''} />}
+        {route.page === 'expenses' && <ExpensesPage nav={nav} />}
+        {route.page === 'learning' && <LearningPage nav={nav} />}
+        {route.page === 'career' && <CareerPage />}
+        {route.page === 'goals' && <GoalsPage nav={nav} workerId={route.workerId} />}
+        {route.page === 'feedback' && <FeedbackPage nav={nav} />}
+        {route.page === 'directory' && <DirectoryPage nav={nav} />}
+        {route.page === 'help' && <HelpPage nav={nav} />}
       </main>
     </div>
   )
+}
+
+const ASSIST: [string, Route][] = [
+  ['Request time off', { page: 'timeoff-request' }],
+  ['View my payslip', { page: 'pay' }],
+  ['My benefits', { page: 'benefits' }],
+  ['Create expense report', { page: 'expenses' }],
+  ['Find a course', { page: 'learning' }],
+  ['My team', { page: 'team' }],
+]
+
+/** keyword routing for the Assistant box; falls back to global search */
+function assistRoute(t: string): Route {
+  const s = t.toLowerCase()
+  const rules: [RegExp, Route][] = [
+    [/time ?off|vacation|pto|holiday|leave|sick/, { page: 'timeoff' }],
+    [/pay ?slip|payslip|paycheck|salary|pay\b|w-?2/, { page: 'pay' }],
+    [/benefit|enrol|medical|dental|vision|401/, { page: 'benefits' }],
+    [/expense|receipt|reimburs/, { page: 'expenses' }],
+    [/course|learn|training/, { page: 'learning' }],
+    [/job|career|opening|apply/, { page: 'career' }],
+    [/goal/, { page: 'goals' }],
+    [/feedback|recogni|kudos|thank/, { page: 'feedback' }],
+    [/team|org ?chart|report/, { page: 'team' }],
+    [/task|inbox|approv/, { page: 'inbox' }],
+    [/help|policy|how/, { page: 'help' }],
+  ]
+  return rules.find(([re]) => re.test(s))?.[1] ?? { page: 'search', q: t }
 }
 
 export const managerName = (personId: string) => person(person(personId).managerId ?? 'priya').name

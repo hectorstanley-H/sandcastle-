@@ -18,11 +18,12 @@ export function pipelineMetrics() {
   const accts = db.get<any>('salesforce.accounts')
   return computeMetrics(opps, accts)
 }
-export function computeMetrics(opps: any[], accts: any[]) {
+/** `qOffset` shifts the "this quarter" window (0 = current quarter, 1 = next); defaults keep the workflow numbers unchanged */
+export function computeMetrics(opps: any[], accts: any[], qOffset = 0) {
   const open = opps.filter((o) => !o.stage.startsWith('Closed'))
   const sum = (l: any[]) => l.reduce((t, o) => t + o.amount, 0)
   const now = new Date()
-  const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
+  const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3 + qOffset * 3, 1)
   const qEnd = new Date(qStart.getFullYear(), qStart.getMonth() + 3, 0)
   const inQ = (o: any) => {
     const d = new Date(o.closeDate + 'T12:00')

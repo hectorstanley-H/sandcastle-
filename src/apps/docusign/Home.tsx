@@ -3,9 +3,11 @@ import { UploadCloud, ArrowRight, Sparkles, LayoutTemplate, FileStack, ChevronRi
 import { useCollection } from '@/db/db'
 import { ME } from '@/data/people'
 import type { Nav } from './index'
-import { C, HWorkerChip, StartButton, StatusLabel, fmtD, fmtT, inInbox, isExpiring, isMine, isWaiting, type Envelope } from './shared'
+import { C, HWorkerChip, StartButton, StatusLabel, fmtD, fmtT, isExpiring, isMine, isWaiting, type Envelope } from './shared'
+import { useToast } from './ui'
 
 export function Home({ nav }: { nav: Nav }) {
+  const toast = useToast()
   const envs = useCollection<Envelope>('docusign.envelopes')
   const live = envs.filter((e) => !e.deleted)
   const counts = {
@@ -89,7 +91,7 @@ export function Home({ nav }: { nav: Nav }) {
                 <div className="text-[18px] font-semibold">Drop documents here to get started</div>
                 <div className="text-[14px] text-[#5E5873] mt-1">Sign or get signatures on PDF, Word, Excel and image files.</div>
               </div>
-              <StartButton onSend={() => nav.send()} onTemplate={() => nav.go({ page: 'templates' })} />
+              <StartButton {...nav.start} />
             </div>
           </div>
 
@@ -138,14 +140,23 @@ export function Home({ nav }: { nav: Nav }) {
         <div className="space-y-5">
           <div className="bg-white rounded-lg border border-[#E5E1EC] p-5">
             <div className="text-[15px] font-semibold mb-3">Action required</div>
+            {live.filter((e) => e.status === 'action').length === 0 && <div className="text-[13px] text-[#5E5873]">Nothing needs your signature right now.</div>}
             {live
               .filter((e) => e.status === 'action')
               .map((e) => (
-                <button key={e.id} onClick={() => nav.go({ page: 'details', id: e.id })} className="w-full text-left py-2.5 border-t border-[#F0EDF4] first:border-0 group">
-                  <div className="text-[13.5px] font-semibold text-[#130032] group-hover:underline line-clamp-2">{e.subject.replace(/^(Please DocuSign|Complete with Docusign): /, '')}</div>
-                  <div className="text-[12.5px] text-[#5E5873]">From {e.senderName} · {fmtD(e.sentAt)}</div>
-                  <span className="mt-2 inline-flex h-8 px-4 items-center rounded-[4px] bg-[#FFCC22] text-[#130032] text-[13px] font-semibold">Sign</span>
-                </button>
+                <div key={e.id} className="py-2.5 border-t border-[#F0EDF4] first:border-0">
+                  <button onClick={() => nav.go({ page: 'details', id: e.id })} className="w-full text-left group">
+                    <div className="text-[13.5px] font-semibold text-[#130032] group-hover:underline line-clamp-2">{e.subject.replace(/^(Please DocuSign|Complete with Docusign): /, '')}</div>
+                    <div className="text-[12.5px] text-[#5E5873]">From {e.senderName} · {fmtD(e.sentAt)}</div>
+                  </button>
+                  <button
+                    data-agent={`docusign-home-sign-${e.id}`}
+                    onClick={() => nav.go({ page: 'sign', id: e.id })}
+                    className="mt-2 inline-flex h-8 px-4 items-center rounded-[4px] bg-[#FFCC22] hover:bg-[#F5BF00] text-[#130032] text-[13px] font-semibold"
+                  >
+                    Sign
+                  </button>
+                </div>
               ))}
           </div>
           <div className="bg-white rounded-lg border border-[#E5E1EC] p-5">
@@ -172,7 +183,9 @@ export function Home({ nav }: { nav: Nav }) {
             <div className="text-[11px] uppercase tracking-wider text-[#FFCC22] font-semibold">Docusign IAM</div>
             <div className="text-[15px] font-semibold mt-1">Automate the full agreement lifecycle</div>
             <div className="text-[12.5px] text-white/75 mt-1">Connect Salesforce, Workday and more with Maestro workflows.</div>
-            <button className="mt-3 text-[13px] font-semibold text-[#FFCC22] hover:underline">Learn more</button>
+            <button onClick={() => toast('Docusign IAM', 'Opening docusign.com/intelligent-agreement-management in a new tab')} className="mt-3 text-[13px] font-semibold text-[#FFCC22] hover:underline">
+              Learn more
+            </button>
           </div>
         </div>
       </div>

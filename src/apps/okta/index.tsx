@@ -15,12 +15,16 @@ const PAGE_MAP: Record<string, Route> = {
   groups: { area: 'admin', page: 'groups' },
   apps: { area: 'admin', page: 'apps' },
   logs: { area: 'admin', page: 'logs' },
+  group: { area: 'admin', page: 'group' },
+  app: { area: 'admin', page: 'app' },
+  selfservice: { area: 'admin', page: 'selfservice' },
+  tasks: { area: 'admin', page: 'tasks' },
 }
 
 function routeFromParams(params: any): Route {
   if (!params) return { area: 'home', page: 'dashboard' }
   const base = PAGE_MAP[params.page] ?? (params.userId ? PAGE_MAP.user : PAGE_MAP.home)
-  return { ...base, userId: params.userId, tab: params.tab ?? (base.page === 'user' ? 'applications' : undefined) }
+  return { ...base, userId: params.userId, groupId: params.groupId, appId: params.appId, tab: params.tab ?? (base.page === 'user' ? 'applications' : undefined) }
 }
 
 export default function Okta({ win, params }: AppProps) {
@@ -52,6 +56,29 @@ export default function Okta({ win, params }: AppProps) {
         workflow: ['/admin/workflow/automations', 'Automations | Okta'],
         customizations: ['/admin/customizations/brands', 'Brands | Okta'],
         settings: ['/admin/settings/account', 'Account | Okta'],
+        group: ['/admin/group', 'Group | Okta'],
+        app: ['/admin/app/instance', 'Application | Okta'],
+        devices: ['/admin/devices-inventory', 'Devices | Okta'],
+        policies: ['/admin/authn/authentication-policies', 'Authentication Policies | Okta'],
+        gsp: ['/admin/access/policies', 'Global Session Policy | Okta'],
+        networks: ['/admin/access/networks', 'Networks | Okta'],
+        admins: ['/admin/access/admins', 'Administrators | Okta'],
+        reports: ['/reports', 'Reports | Okta'],
+        agents: ['/admin/agents', 'Agents | Okta'],
+        notifications: ['/admin/notifications', 'Notifications | Okta'],
+        gettingstarted: ['/admin/getting-started', 'Getting Started | Okta'],
+        sources: ['/admin/profile-sources', 'Profile Sources | Okta'],
+        'enduser-settings': ['/admin/settings/user-dashboard', 'End-User Dashboard | Okta'],
+        'custom-other': ['/admin/customizations/other', 'Other Customizations | Okta'],
+        api: ['/admin/api-service-integrations', 'API Service Integrations | Okta'],
+        'security-general': ['/admin/access/general', 'General Security | Okta'],
+        'profile-enrollment': ['/admin/authn/profile-enrollment', 'Profile Enrollment | Okta'],
+        itp: ['/admin/itp', 'Identity Threat Protection | Okta'],
+        hooks: ['/admin/workflow/eventhooks', 'Event Hooks | Okta'],
+        wfconsole: ['/admin/workflows', 'Workflows | Okta'],
+        insights: ['/admin/insights', 'Okta Insights | Okta'],
+        features: ['/admin/settings/features', 'Features | Okta'],
+        downloads: ['/admin/settings/downloads', 'Downloads | Okta'],
       }
       if (route.page === 'user' && u) {
         url = `${A}/admin/user/profile/view/${u.oktaId}#tab-${route.tab === 'roles' ? 'roles' : route.tab === 'applications' || !route.tab ? 'apps' : route.tab}`

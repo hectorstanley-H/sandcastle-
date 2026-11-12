@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { MagnifyingGlass, Plus, Star, DownloadSimple } from '@phosphor-icons/react'
-import { useCollection } from '@/db/db'
+import { db, useCollection } from '@/db/db'
+import { useDesk } from '@/os/context'
 import { ME } from '@/data/people'
 import { Avatar } from '@/components/Avatar'
 import type { Candidate, Job } from './types'
 import { Btn, daysSince, type Go } from './shared'
 import { activeCount, stageCounts } from './data'
+import { CreateJobModal } from './Modals'
+import { isStarred } from './Pipeline'
 
 const STATUS_STYLE: Record<Job['status'], string> = {
   open: 'bg-[#E3F5EC] text-[#11734B]',
@@ -21,6 +24,10 @@ export function JobsList({ go }: { go: Go }) {
   const [dept, setDept] = useState('all')
   const [office, setOffice] = useState('all')
   const [q, setQ] = useState('')
+  const [types, setTypes] = useState<Record<string, boolean>>({ 'Full-time': true, 'Part-time': false, Contract: false, Intern: false })
+  const [creating, setCreating] = useState(false)
+  const { toast } = useDesk()
+  const anyType = Object.values(types).some(Boolean)
   const depts = [...new Set(jobs.map((j) => j.department))].sort()
   const offices = [...new Set(jobs.map((j) => j.office))].sort()
   const list = jobs.filter(
@@ -29,6 +36,7 @@ export function JobsList({ go }: { go: Go }) {
       (!mine || j.hiringTeam.includes(ME.id)) &&
       (dept === 'all' || j.department === dept) &&
       (office === 'all' || j.office === office) &&
+      (!anyType || types[j.employmentType] !== false) &&
       (!q || (j.name + j.reqId).toLowerCase().includes(q.toLowerCase())),
   )
 
@@ -71,9 +79,10 @@ export function JobsList({ go }: { go: Go }) {
         </div>
         <div>
           <div className="text-[13.5px] font-semibold mb-2">Employment type</div>
-          {['Full-time', 'Part-time', 'Contract', 'Intern'].map((t, i) => (
+          {['Full-time', 'Part-time', 'Contract', 'Intern'].map((t) => (
             <label key={t} className="flex items-center gap-2 text-[14px] py-1">
-              <input type="checkbox" defaultChecked={i === 0} className="w-4 h-4 accent-[#15372C]" /> {t}
+              <input type="checkbox" checked={!!types[t]} onChange={(e) => setTypes({ ...types, [t]: e.target.checked })} className="w-4 h-4 accent-[#15372C]" /> {t}
+              <span className="ml-auto text-[12.5px] text-[#7A8884]">{jobs.filter((j) => j.employmentType === t).length}</span>
             </label>
           ))}
         </div>
@@ -86,8 +95,8 @@ export function JobsList({ go }: { go: Go }) {
               <div className="text-[13.5px] text-[#5B6B66] mt-0.5">{list.length} jobs · {list.reduce((a, j) => a + j.openings - j.filled, 0)} openings</div>
             </div>
             <div className="flex gap-2">
-              <Btn><DownloadSimple size={16} /> Export</Btn>
-              <Btn kind="primary"><Plus size={16} weight="bold" /> Create a job</Btn>
+              <Btn data-agent="greenhouse-jobs-export" onClick={() => toast({ appId: 'greenhouse', title: 'Export started', body: `jobs_export.xlsx with ${list.length} jobs will be emailed to ${ME.email}.` })}><DownloadSimple size={16} /> Export</Btn>
+              <Btn kind="primary" data-agent="greenhouse-jobs-create" onClick={() => setCreating(true)}><Plus size={16} weight="bold" /> Create a job</Btn>
             </div>
           </div>
           <div className="bg-white border border-[#E1E4E2] rounded-lg overflow-hidden">
@@ -112,7 +121,11 @@ export function JobsList({ go }: { go: Go }) {
                   const m = stageCounts(j.id, cands)
                   return (
                     <tr key={j.id} className="border-b border-[#EDEFEE] last:border-0 hover:bg-[#FAFBFA]">
-                      <td className="pl-3"><Star size={16} weight={j.hiringManager === ME.id ? 'fill' : 'regular'} className={j.hiringManager === ME.id ? 'text-[#F0B429]' : 'text-[#B5BFBB]'} /></td>
+                      <td className="pl-3">
+                        <button aria-label={isStarred(j) ? `Unfollow ${j.name}` : `Follow ${j.name}`} onClick={() => db.update('greenhouse.jobs', j.id, { starred: !isStarred(j) })} className="flex">
+                          <Star size={16} weight={isStarred(j) ? 'fill' : 'regular'} className={isStarred(j) ? 'text-[#F0B429]' : 'text-[#B5BFBB] hover:text-[#F0B429]'} />
+                        </button>
+                      </td>
                       <td className="py-3 px-3">
                         <button data-agent={`greenhouse-job-${j.id}`} aria-label={`Open job ${j.name}`} onClick={() => go({ page: 'job', jobId: j.id, tab: 'candidates' })} className="font-semibold text-[14px] text-left hover:underline">
                           {j.name}
@@ -142,6 +155,7 @@ export function JobsList({ go }: { go: Go }) {
           </div>
         </div>
       </div>
+      {creating && <CreateJobModal onClose={() => setCreating(false)} onDone={(id) => (setCreating(false), go({ page: 'job', jobId: id, tab: 'setup' }))} />}
     </div>
   )
 }

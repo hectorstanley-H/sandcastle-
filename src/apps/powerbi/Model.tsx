@@ -3,12 +3,23 @@ import { ArrowClockwise20Regular, CalendarClock20Regular, Database20Regular, Tab
 import { useCollection } from '@/db/db'
 import { useDesk } from '@/os/context'
 import { HWChip, ItemIcon, TYPE_LABEL, applyRefresh, dataSource, fmtDT, usePbi } from './shared'
+import { ShareDialog } from './Report'
+import { ExploreDialog, ScheduleDialog, createReportFrom } from './views'
+import { person } from '@/data/people'
 
 export function ModelView({ rec }: { rec: any }) {
   const all = useCollection('powerbi.reports')
   const { isAgent } = useDesk()
   const pbi = usePbi()
   const [busy, setBusy] = useState(false)
+  const [dialog, setDialog] = useState<null | 'schedule' | 'share' | 'explore'>(null)
+  const createReport = () => {
+    if (!src || src === rec) return pbi.notify({ kind: 'info', title: 'Create report', body: 'This item has no data to build a report from yet.' })
+    let n = `${rec.name} report`
+    let k = 2
+    while (all.some((r) => r.name === n)) n = `${rec.name} report (${k++})`
+    pbi.openItem(createReportFrom(src, n, 'My workspace', isAgent))
+  }
   const src = dataSource(rec, all)
   const history: any[] = src.history ?? []
   const refresh = () => {
@@ -35,8 +46,13 @@ export function ModelView({ rec }: { rec: any }) {
           <button data-agent="powerbi-model-refresh" onClick={refresh} className="flex items-center gap-1.5 h-8 px-2.5 rounded hover:bg-[#F3F2F1] text-[13px]">
             <ArrowClockwise20Regular className={busy ? 'animate-spin text-[#0F6CBD]' : ''} /> Refresh now
           </button>
-          {[[CalendarClock20Regular, 'Schedule refresh'], [DataBarVertical20Regular, 'Create report'], [Share20Regular, 'Share'], [Table20Regular, 'Explore this data']].map(([I, l]: any) => (
-            <button key={l} className="flex items-center gap-1.5 h-8 px-2.5 rounded hover:bg-[#F3F2F1] text-[13px]">
+          {[
+            [CalendarClock20Regular, 'Schedule refresh', () => setDialog('schedule')],
+            [DataBarVertical20Regular, 'Create report', createReport],
+            [Share20Regular, 'Share', () => setDialog('share')],
+            [Table20Regular, 'Explore this data', () => setDialog('explore')],
+          ].map(([I, l, fn]: any) => (
+            <button key={l} data-agent={`powerbi-model-${l.toLowerCase().replace(/\s+/g, '-')}`} onClick={fn} className="flex items-center gap-1.5 h-8 px-2.5 rounded hover:bg-[#F3F2F1] text-[13px]">
               <I /> {l}
             </button>
           ))}
@@ -73,7 +89,7 @@ export function ModelView({ rec }: { rec: any }) {
         </div>
         <div className="space-y-3 text-[13px]">
           {[
-            ['Owner', rec.owner],
+            ['Owner', person(rec.owner).name],
             ['Workspace', rec.workspace],
             ['Storage', rec.storage ?? '—'],
             ['Gateway', rec.gateway ?? '—'],
@@ -96,6 +112,9 @@ export function ModelView({ rec }: { rec: any }) {
           )}
         </div>
       </div>
+      {dialog === 'schedule' && <ScheduleDialog rec={src === rec ? rec : src} onClose={() => setDialog(null)} onDone={(m) => pbi.notify({ kind: 'success', title: 'Refresh schedule updated', body: m })} />}
+      {dialog === 'share' && <ShareDialog rec={rec} prefix="powerbi-model-share" onClose={() => setDialog(null)} />}
+      {dialog === 'explore' && <ExploreDialog rec={rec} onClose={() => setDialog(null)} />}
     </div>
   )
 }

@@ -1,24 +1,51 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { CalendarBlank, ClipboardText, CurrencyCircleDollar, UserList, CaretRight, CaretDown, VideoCamera, MapPin, Briefcase, UserPlus, ChartBar, Megaphone, ArrowSquareOut } from '@phosphor-icons/react'
-import { useCollection } from '@/db/db'
+import { db, useCollection } from '@/db/db'
+import { useDesk } from '@/os/context'
 import { ME, person } from '@/data/people'
 import { Avatar } from '@/components/Avatar'
 import type { Candidate, Interview, Job } from './types'
 import { PIPELINE, STAGE_LABEL } from './types'
 import { Card, fmtTimeOnly, type Go, HWorkerChip } from './shared'
 import { scorecardsDue, stageCounts, toSchedule, activeCount } from './data'
+import { AddCandidateModal, approveOffer, CreateJobModal, InterviewKitModal, ScorecardModal } from './Modals'
+
+function Cust({ id, hidden, customizing, onHide, children }: { id: string; hidden: string[]; customizing: boolean; onHide: (id: string) => void; children: ReactNode }) {
+  if (hidden.includes(id)) return null
+  return (
+    <div className="relative">
+      {children}
+      {customizing && (
+        <button onClick={() => onHide(id)} className="absolute top-2.5 right-3 h-7 px-2.5 rounded-md bg-[#15372C] text-white text-[12px] font-medium z-10">
+          Hide
+        </button>
+      )}
+    </div>
+  )
+}
+
+const CARD_NAMES: Record<string, string> = { interviews: 'My Interviews', jobs: "Jobs I'm hiring for", activity: 'Recent activity on my jobs', tasks: 'My Tasks', approvals: 'Pending approvals', links: 'Quick links' }
 
 export function Dashboard({ go }: { go: Go }) {
   const jobs = useCollection<Job>('greenhouse.jobs')
   const cands = useCollection<Candidate>('greenhouse.candidates')
   const interviews = useCollection<Interview>('greenhouse.interviews')
   const [open, setOpen] = useState<string | null>('schedule')
+  const { isAgent, toast } = useDesk()
+  const prefs = useCollection<any>('greenhouse.prefs').find((p) => p.id === 'dash-alex')
+  const hidden: string[] = prefs?.hidden ?? []
+  const [customizing, setCustomizing] = useState(false)
+  const [dlg, setDlg] = useState<null | 'candidate' | 'job'>(null)
+  const [kit, setKit] = useState<Interview | null>(null)
+  const [sc, setSc] = useState<Interview | null>(null)
+  const setHidden = (h: string[]) => db.upsert('greenhouse.prefs', { id: 'dash-alex', hidden: h })
+  const cp = { hidden, customizing, onHide: (id: string) => setHidden([...hidden, id]) }
   const hour = new Date().getHours()
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
   const myJobs = jobs.filter((j) => j.hiringManager === ME.id || j.hiringTeam.includes(ME.id)).filter((j) => j.status !== 'draft')
   const sched = toSchedule(ME.id, jobs, cands, interviews)
   const due = scorecardsDue(ME.id, cands, interviews)
-  const offers = cands.filter((c) => c.offer?.status === 'pending_approval' && c.offer.approvers.includes(ME.id))
+  const offers = cands.filter((c) => c.offer?.status === 'pending_approval' && c.offer.approvers.includes(ME.id) && !(c.offer.approvedBy ?? []).includes(ME.id))
   const review = cands.filter((c) => c.stage === 'application_review' && myJobs.some((j) => j.id === c.jobId && j.hiringManager === ME.id))
   const upcoming = interviews
     .filter((i) => i.interviewers.includes(ME.id) && i.status === 'scheduled' && +new Date(i.end) > Date.now())
@@ -41,11 +68,25 @@ export function Dashboard({ go }: { go: Go }) {
             <h1 className="text-[28px] font-semibold tracking-[-0.02em]">{greet}, {ME.first}</h1>
             <div className="text-[14px] text-[#5B6B66] mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · Northwind Global</div>
           </div>
-          <button className="text-[13.5px] text-[#1B7F62] font-medium hover:underline">Customize dashboard</button>
+          <button data-agent="greenhouse-customize-dashboard" onClick={() => setCustomizing((c) => !c)} className="text-[13.5px] text-[#1B7F62] font-medium hover:underline">
+            {customizing ? 'Done customizing' : 'Customize dashboard'}
+          </button>
         </div>
+        {customizing && (
+          <div className="mb-5 rounded-lg border border-dashed border-[#24A47F] bg-[#F2FAF6] px-5 py-3 text-[13.5px] flex items-center gap-3 flex-wrap">
+            <span className="font-medium">Customizing — hide cards you don’t need.</span>
+            {hidden.length > 0 && <span className="text-[#5B6B66]">Hidden:</span>}
+            {hidden.map((h) => (
+              <button key={h} onClick={() => setHidden(hidden.filter((x) => x !== h))} className="h-7 px-2.5 rounded-full border border-[#C9D0CD] bg-white text-[12.5px] hover:bg-[#F2F4F3]">
+                + {CARD_NAMES[h]}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-6">
           <div className="space-y-6 min-w-0">
+            <Cust id="interviews" {...cp}>
             <Card title="My Interviews" action={<span className="text-[13px] text-[#5B6B66]">{upcoming.length} upcoming</span>}>
               {upcoming.length === 0 && <div className="px-5 py-6 text-[13.5px] text-[#5B6B66]">No upcoming interviews.</div>}
               {upcoming.slice(0, 6).map((i) => {
@@ -73,12 +114,14 @@ export function Dashboard({ go }: { go: Go }) {
                     <div className="flex -space-x-1.5">
                       {i.interviewers.map((p) => <Avatar key={p} id={p} size={26} ring="#fff" />)}
                     </div>
-                    <button className="h-8 px-3 rounded-md border border-[#C9D0CD] text-[13px] font-medium hover:bg-[#F2F4F3]">Interview Kit</button>
+                    <button onClick={() => setKit(i)} className="h-8 px-3 rounded-md border border-[#C9D0CD] text-[13px] font-medium hover:bg-[#F2F4F3]">Interview Kit</button>
                   </div>
                 )
               })}
             </Card>
+            </Cust>
 
+            <Cust id="jobs" {...cp}>
             <Card title="Jobs I'm hiring for" action={<button onClick={() => go({ page: 'jobs' })} className="text-[13px] text-[#1B7F62] font-medium hover:underline">View all jobs</button>}>
               <div className="grid grid-cols-[minmax(0,1fr)_repeat(5,72px)] px-5 h-9 items-center text-[11.5px] uppercase tracking-wide text-[#5B6B66] font-semibold border-b border-[#EDEFEE]">
                 <span>Job</span>
@@ -106,7 +149,9 @@ export function Dashboard({ go }: { go: Go }) {
                 )
               })}
             </Card>
+            </Cust>
 
+            <Cust id="activity" {...cp}>
             <Card title="Recent activity on my jobs">
               {cands
                 .filter((c) => myJobs.some((j) => j.id === c.jobId))
@@ -125,9 +170,11 @@ export function Dashboard({ go }: { go: Go }) {
                   </div>
                 ))}
             </Card>
+            </Cust>
           </div>
 
           <div className="space-y-6">
+            <Cust id="tasks" {...cp}>
             <Card title="My Tasks">
               {tasks.map((t) => (
                 <div key={t.id} className="border-b border-[#EDEFEE] last:border-0">
@@ -150,7 +197,9 @@ export function Dashboard({ go }: { go: Go }) {
                 </div>
               ))}
             </Card>
+            </Cust>
 
+            <Cust id="approvals" {...cp}>
             <Card title="Pending approvals">
               {offers.map((c) => (
                 <div key={c.id} className="px-5 py-3 border-b border-[#EDEFEE]">
@@ -158,8 +207,8 @@ export function Dashboard({ go }: { go: Go }) {
                   <button onClick={() => go({ page: 'candidate', candidateId: c.id })} className="text-[14px] font-semibold hover:underline">{c.name}</button>
                   <div className="text-[13px] text-[#5B6B66]">{jname(c.jobId)?.name} · {c.offer?.salary} base · Start {new Date(c.offer!.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
                   <div className="flex gap-2 mt-2">
-                    <button className="h-8 px-3 rounded-md bg-[#15372C] text-white text-[13px] font-medium">Approve</button>
-                    <button className="h-8 px-3 rounded-md border border-[#C9D0CD] text-[13px] font-medium">Review offer</button>
+                    <button data-agent={`greenhouse-approve-offer-${c.id}`} onClick={() => approveOffer(c, isAgent)} className="h-8 px-3 rounded-md bg-[#15372C] text-white text-[13px] font-medium">Approve</button>
+                    <button onClick={() => go({ page: 'candidate', candidateId: c.id })} className="h-8 px-3 rounded-md border border-[#C9D0CD] text-[13px] font-medium">Review offer</button>
                   </div>
                 </div>
               ))}
@@ -170,8 +219,11 @@ export function Dashboard({ go }: { go: Go }) {
                   <div className="text-[13px] text-[#5B6B66]">{j.reqId} · {j.office}</div>
                 </div>
               ))}
+              {offers.length === 0 && jobs.filter((j) => j.status === 'draft').length === 0 && <div className="px-5 py-4 text-[13.5px] text-[#5B6B66]">Nothing waiting on you.</div>}
             </Card>
+            </Cust>
 
+            <Cust id="links" {...cp}>
             <Card title="Quick links">
               <div className="p-2">
                 {[
@@ -181,16 +233,45 @@ export function Dashboard({ go }: { go: Go }) {
                   [ChartBar, 'Pipeline report'],
                   [ArrowSquareOut, 'Greenhouse Help Center'],
                 ].map(([I, l]: any) => (
-                  <button key={l} onClick={() => l === 'Pipeline report' && go({ page: 'reports' })} className="w-full flex items-center gap-3 px-3 h-10 rounded-md hover:bg-[#F2F4F3] text-[14px]">
+                  <button
+                    key={l}
+                    onClick={() =>
+                      l === 'Pipeline report'
+                        ? go({ page: 'reports' })
+                        : l === 'Add a candidate'
+                          ? setDlg('candidate')
+                          : l === 'Create a job'
+                            ? setDlg('job')
+                            : l === 'Job board & posts'
+                              ? go({ page: 'posts' })
+                              : toast({ appId: 'greenhouse', title: 'Greenhouse Help Center', body: 'Opened support.greenhouse.io in a new tab.' })
+                    }
+                    className="w-full flex items-center gap-3 px-3 h-10 rounded-md hover:bg-[#F2F4F3] text-[14px]"
+                  >
                     <I size={17} className="text-[#1B7F62]" />
                     {l}
                   </button>
                 ))}
               </div>
             </Card>
+            </Cust>
           </div>
         </div>
       </div>
+      {dlg === 'candidate' && <AddCandidateModal onClose={() => setDlg(null)} onDone={(id) => (setDlg(null), go({ page: 'candidate', candidateId: id }))} />}
+      {dlg === 'job' && <CreateJobModal onClose={() => setDlg(null)} onDone={(id) => (setDlg(null), go({ page: 'job', jobId: id, tab: 'setup' }))} />}
+      {kit && (
+        <InterviewKitModal
+          iv={kit}
+          c={cname(kit.candidateId)}
+          onClose={() => setKit(null)}
+          onScorecard={() => {
+            setSc(kit)
+            setKit(null)
+          }}
+        />
+      )}
+      {sc && cname(sc.candidateId) && <ScorecardModal c={cname(sc.candidateId)!} job={jname(sc.jobId)} initialKey={{ stage: sc.stage, key: sc.planKey ?? '' }} onClose={() => setSc(null)} />}
     </div>
   )
 }

@@ -1,14 +1,26 @@
 import { useState } from 'react'
-import { MagnifyingGlass, DownloadSimple } from '@phosphor-icons/react'
+import { MagnifyingGlass, DownloadSimple, UserPlus } from '@phosphor-icons/react'
 import { useCollection } from '@/db/db'
-import type { Candidate, Job } from './types'
+import { useDesk } from '@/os/context'
+import { ME } from '@/data/people'
+import type { Candidate, Job, Stage } from './types'
+import { STAGE_LABEL } from './types'
 import { Btn, fmtDay, type Go, StagePill } from './shared'
+import { AddCandidateModal } from './Modals'
 
 export function CandidatesList({ go }: { go: Go }) {
   const cands = useCollection<Candidate>('greenhouse.candidates')
   const jobs = useCollection<Job>('greenhouse.jobs')
   const [q, setQ] = useState('')
-  const list = cands.filter((c) => !q || `${c.name} ${c.company} ${c.title}`.toLowerCase().includes(q.toLowerCase())).sort((a, b) => +new Date(b.lastActivity) - +new Date(a.lastActivity))
+  const [stage, setStage] = useState<'all' | 'active' | Stage>('all')
+  const [jobF, setJobF] = useState('all')
+  const [adding, setAdding] = useState(false)
+  const { toast } = useDesk()
+  const list = cands
+    .filter((c) => !q || `${c.name} ${c.company} ${c.title}`.toLowerCase().includes(q.toLowerCase()))
+    .filter((c) => (stage === 'all' ? true : stage === 'active' ? c.stage !== 'rejected' && c.stage !== 'hired' : c.stage === stage))
+    .filter((c) => jobF === 'all' || c.jobId === jobF)
+    .sort((a, b) => +new Date(b.lastActivity) - +new Date(a.lastActivity))
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="px-8 pt-6 pb-4 flex items-center gap-4">
@@ -17,8 +29,34 @@ export function CandidatesList({ go }: { go: Go }) {
           <MagnifyingGlass size={15} className="text-[#5B6B66]" />
           <input data-agent="greenhouse-candidates-filter" aria-label="Filter candidates" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, company or title" className="flex-1 outline-none text-[13.5px]" />
         </div>
-        <Btn><DownloadSimple size={15} /> Export</Btn>
+        <Btn data-agent="greenhouse-candidates-export" onClick={() => toast({ appId: 'greenhouse', title: 'Export started', body: `candidates_export.xlsx with ${list.length} candidates will be emailed to ${ME.email}.` })}><DownloadSimple size={15} /> Export</Btn>
+        <Btn kind="primary" data-agent="greenhouse-candidates-add" onClick={() => setAdding(true)}><UserPlus size={15} /> Add Candidate</Btn>
       </div>
+      <div className="px-8 pb-4 flex items-center gap-3 text-[13.5px]">
+        <select aria-label="Filter by stage" value={stage} onChange={(e) => setStage(e.target.value as any)} className="h-9 rounded-md border border-[#C9D0CD] px-2 bg-white">
+          <option value="all">All stages</option>
+          <option value="active">Active (not hired / rejected)</option>
+          {(Object.keys(STAGE_LABEL) as Stage[]).map((s) => (
+            <option key={s} value={s}>
+              {STAGE_LABEL[s]}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Filter by job" value={jobF} onChange={(e) => setJobF(e.target.value)} className="h-9 rounded-md border border-[#C9D0CD] px-2 bg-white max-w-[320px]">
+          <option value="all">All jobs</option>
+          {jobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.name}
+            </option>
+          ))}
+        </select>
+        {(stage !== 'all' || jobF !== 'all') && (
+          <button onClick={() => (setStage('all'), setJobF('all'))} className="text-[#1B7F62] font-medium hover:underline">
+            Clear
+          </button>
+        )}
+      </div>
+      {adding && <AddCandidateModal onClose={() => setAdding(false)} onDone={(id) => (setAdding(false), go({ page: 'candidate', candidateId: id }))} />}
       <div className="flex-1 min-h-0 overflow-auto px-8 pb-8">
         <div className="bg-white rounded-lg border border-[#E1E4E2]">
           <table className="w-full text-[13.5px]">

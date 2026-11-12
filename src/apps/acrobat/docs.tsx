@@ -10,6 +10,8 @@ export interface AnnoCtxT {
   notes: Record<string, number>
   tool: string
   onField: (k: string, e: React.MouseEvent) => void
+  /** static preview renders (e.g. Organize pages) — no agent ids, no interaction */
+  noAgent?: boolean
 }
 export const AnnoCtx = createContext<AnnoCtxT>({ highlights: new Set(), notes: {}, tool: 'select', onField: () => {} })
 
@@ -20,8 +22,8 @@ export function F({ k, children, className = '' }: { k: string; children: ReactN
   const armed = c.tool === 'highlight' || c.tool === 'comment'
   return (
     <span
-      data-agent={`acrobat-field-${k}`}
-      aria-label={`Field ${k}`}
+      data-agent={c.noAgent ? undefined : `acrobat-field-${k}`}
+      aria-label={c.noAgent ? undefined : `Field ${k}`}
       onClick={(e) => c.onField(k, e)}
       className={`relative ${armed ? 'cursor-text hover:outline hover:outline-1 hover:outline-[#1473E6]/60' : ''} ${className}`}
       style={hl ? { background: 'rgba(255, 230, 0, 0.55)', boxShadow: '0 0 0 2px rgba(255,230,0,0.55)' } : undefined}

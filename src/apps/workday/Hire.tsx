@@ -4,7 +4,7 @@ import { db, uid, useRecord } from '@/db/db'
 import { useDesk } from '@/os/context'
 import { ME, PEOPLE, person } from '@/data/people'
 import { Avatar } from '@/components/Avatar'
-import { Btn, Card, Field, HWorkerChip, Pill, AppIcon, inputCls } from './ui'
+import { Btn, Card, Field, HWorkerChip, Pill, AppIcon, Modal, inputCls, textareaCls } from './ui'
 import type { Nav } from './index'
 import { fmtLong, fmtMDY } from './util'
 
@@ -18,14 +18,22 @@ export function HirePage({ nav, workerId }: { nav: Nav; workerId: string }) {
   const onb = useRecord<any>('workday.onboarding', 'onb-' + workerId.replace('wd-', ''))
   const w = useRecord<any>('workday.workers', workerId)
   if (!onb || !w) return <div className="p-10 text-[14px]">No onboarding found.</div>
-  return onb.hireDone ? <Onboarding nav={nav} onb={onb} w={w} /> : <HireSteps onb={onb} w={w} />
+  return onb.hireDone ? <Onboarding nav={nav} onb={onb} w={w} /> : <HireSteps onb={onb} w={w} nav={nav} />
 }
 
-function HireSteps({ onb, w }: { onb: any; w: any }) {
+function HireSteps({ onb, w, nav }: { onb: any; w: any; nav: Nav }) {
   const { isAgent } = useDesk()
   const [step, setStep] = useState(0)
-  const [f, setF] = useState({ position: '', location: 'Boston, MA — One Federal', start: onb.startDate as string, reason: '', employeeType: 'Regular', timeType: 'Full time', base: '', frequency: 'Annual' })
+  // a person returning to a saved draft gets their entries back (agents always start from a clean form)
+  const blank = { position: '', location: 'Boston, MA — One Federal', start: onb.startDate as string, reason: '', employeeType: 'Regular', timeType: 'Full time', base: '', frequency: 'Annual' }
+  const [f, setF] = useState(() => (!isAgent && onb.hireDraft ? { ...blank, ...onb.hireDraft } : blank))
   const [err, setErr] = useState('')
+  const [savedAt, setSavedAt] = useState<string | null>(!isAgent && onb.hireDraftAt ? onb.hireDraftAt : null)
+  const saveForLater = () => {
+    const at = new Date().toISOString()
+    db.update('workday.onboarding', onb.id, { hireDraft: f, hireDraftAt: at })
+    setSavedAt(at)
+  }
   const pos = POSITIONS.find((p) => p.id === f.position)
   const set = (k: keyof typeof f) => (e: any) => {
     setF({ ...f, [k]: e.target.value })
@@ -200,7 +208,15 @@ function HireSteps({ onb, w }: { onb: any; w: any }) {
           </Btn>
         )}
         {step > 0 && <Btn onClick={() => setStep(step - 1)}>Back</Btn>}
-        <Btn variant="tertiary">Save for Later</Btn>
+        <Btn variant="tertiary" onClick={saveForLater}>Save for Later</Btn>
+        {savedAt && (
+          <span className="text-[13.5px] text-[#5E6A75] flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-[#319C4C]" /> Draft saved {new Date(savedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} ·
+            <button onClick={() => nav({ page: 'inbox' })} className="font-bold text-[#0875E1] hover:underline">
+              Back to My Tasks
+            </button>
+          </span>
+        )}
       </div>
     </div>
   )
@@ -211,7 +227,11 @@ const ASSIGNEES = PEOPLE.filter((p) => !p.external && p.id !== 'jordan')
 function Onboarding({ nav, onb, w }: { nav: Nav; onb: any; w: any }) {
   const { isAgent } = useDesk()
   const [saved, setSaved] = useState(false)
+  const [adding, setAdding] = useState(false)
   const done = onb.tasks.filter((t: any) => t.status === 'Complete').length
+  const toggleDone = (t: any) => {
+    db.update('workday.onboarding', onb.id, (o) => ({ tasks: o.tasks.map((x: any) => (x.id === t.id ? { ...x, status: x.status === 'Complete' ? (x.assignee ? 'Assigned' : 'Not Started') : 'Complete', completedAt: x.status === 'Complete' ? undefined : new Date().toISOString() } : x)) }))
+  }
   const assigned = onb.tasks.filter((t: any) => t.assignee).length
   const setAssignee = (tid: string, a: string) => {
     db.update('workday.onboarding', onb.id, (o) => ({ tasks: o.tasks.map((t: any) => (t.id === tid ? { ...t, assignee: a || null, status: a && t.status === 'Not Started' ? 'Assigned' : t.status, assignedBy: isAgent ? 'hworker' : 'alex' } : t)) }))
@@ -272,7 +292,15 @@ function Onboarding({ nav, onb, w }: { nav: Nav; onb: any; w: any }) {
               .filter((t: any) => t.category === c)
               .map((t: any) => (
                 <div key={t.id} data-agent={`workday-onb-task-${t.id}`} className={`grid grid-cols-[28px_minmax(0,1fr)_240px_110px_130px] gap-4 items-center px-6 py-3 border-b border-[#F0F1F2] ${t.assignedBy === 'hworker' ? 'flash-new' : ''}`}>
-                  {t.status === 'Complete' ? <CheckCircle2 size={22} className="text-[#319C4C]" /> : <span className="w-[22px] h-[22px] rounded-full border-2 border-[#A1AAB3]" />}
+                  {t.status === 'Complete' ? (
+                    <button aria-label={`Mark ${t.title} not complete`} onClick={() => toggleDone(t)} className="rounded-full">
+                      <CheckCircle2 size={22} className="text-[#319C4C]" />
+                    </button>
+                  ) : t.assignee ? (
+                    <button aria-label={`Mark ${t.title} complete`} title="Mark complete" onClick={() => toggleDone(t)} className="w-[22px] h-[22px] rounded-full border-2 border-[#A1AAB3] hover:border-[#319C4C] hover:bg-[#EAF7EE]" />
+                  ) : (
+                    <span className="w-[22px] h-[22px] rounded-full border-2 border-[#A1AAB3]" />
+                  )}
                   <div className="min-w-0">
                     <div className="text-[14px] font-bold">{t.title}</div>
                     <div className="text-[12.5px] text-[#5E6A75] truncate">{t.desc}</div>
@@ -303,7 +331,7 @@ function Onboarding({ nav, onb, w }: { nav: Nav; onb: any; w: any }) {
           <Btn variant="primary" agent="workday-onb-save" onClick={save}>
             Submit
           </Btn>
-          <Btn>Add Task</Btn>
+          <Btn agent="workday-onb-add-task" onClick={() => setAdding(true)}>Add Task</Btn>
           {saved && (
             <span className="text-[14px] text-[#1E6F34] font-bold flex items-center gap-1.5" data-agent="workday-onb-saved">
               <CheckCircle2 size={18} /> Onboarding plan submitted — assignees notified
@@ -311,6 +339,72 @@ function Onboarding({ nav, onb, w }: { nav: Nav; onb: any; w: any }) {
           )}
         </div>
       </Card>
+      {adding && (
+        <AddTaskModal
+          cats={cats}
+          onClose={() => setAdding(false)}
+          onAdd={(t) => {
+            db.update('workday.onboarding', onb.id, (o) => ({ tasks: [...o.tasks, { ...t, id: uid('ot'), status: t.assignee ? 'Assigned' : 'Not Started', assignedBy: isAgent ? 'hworker' : 'alex' }] }))
+            setSaved(false)
+            setAdding(false)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function AddTaskModal({ cats, onClose, onAdd }: { cats: string[]; onClose: () => void; onAdd: (t: any) => void }) {
+  const [f, setF] = useState({ title: '', desc: '', category: cats.includes('Team') ? 'Team' : cats[0] ?? 'Team', assignee: '', due: new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10) })
+  const [err, setErr] = useState('')
+  const set = (k: keyof typeof f) => (e: any) => (setF({ ...f, [k]: e.target.value }), setErr(''))
+  return (
+    <Modal
+      title="Add Onboarding Task"
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="primary" onClick={() => (f.title.trim() ? onAdd({ ...f, title: f.title.trim(), assignee: f.assignee || null }) : setErr('Task is required.'))}>
+            OK
+          </Btn>
+          <Btn onClick={onClose}>Cancel</Btn>
+        </>
+      }
+    >
+      {err && <div className="rounded-lg border border-[#DE2E21] bg-[#FDE2E0] px-4 py-2.5 text-[13.5px] text-[#A31B12] font-medium mb-3">{err}</div>}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="col-span-2">
+          <div className="text-[14px] font-medium mb-1.5">Task<span className="text-[#DE2E21]">*</span></div>
+          <input aria-label="Task title" value={f.title} onChange={set('title')} className={inputCls + ' max-w-none'} />
+        </div>
+        <div className="col-span-2">
+          <div className="text-[14px] font-medium mb-1.5">Description</div>
+          <textarea aria-label="Task description" value={f.desc} onChange={set('desc')} className={textareaCls + ' h-20'} />
+        </div>
+        <div>
+          <div className="text-[14px] font-medium mb-1.5">Category</div>
+          <select aria-label="Task category" value={f.category} onChange={set('category')} className={inputCls}>
+            {[...new Set([...cats, 'Team', 'IT', 'Facilities', 'Compliance'])].map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div className="text-[14px] font-medium mb-1.5">Due Date</div>
+          <input type="date" aria-label="Task due date" value={f.due} onChange={set('due')} className={inputCls} />
+        </div>
+        <div className="col-span-2">
+          <div className="text-[14px] font-medium mb-1.5">Assignee</div>
+          <select aria-label="Task assignee" value={f.assignee} onChange={set('assignee')} className={inputCls}>
+            <option value="">Unassigned</option>
+            {ASSIGNEES.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} — {p.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </Modal>
   )
 }

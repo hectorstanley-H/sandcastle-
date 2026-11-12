@@ -5,7 +5,7 @@ import { useDesk } from '@/os/context'
 import { ME, person } from '@/data/people'
 import { isoDate } from '@/data/time'
 import { Avatar } from '@/components/Avatar'
-import { Btn, Card, HWorkerChip, Pill, AppIcon, inputCls } from './ui'
+import { Btn, Card, HWorkerChip, Pill, AppIcon, Modal, Success, inputCls } from './ui'
 import type { Nav } from './index'
 import { chargeHours, fmtDays, fmtLong, fmtMDY, holidayName, holidays, isWeekend } from './util'
 
@@ -16,8 +16,24 @@ function useMe() {
   return useRecord<any>('workday.workers', 'wd-alex')
 }
 
+const toneOf = (st: string) => (st === 'Approved' ? 'green' : st === 'Submitted' ? 'orange' : st === 'Denied' || st === 'Sent Back' ? 'red' : 'gray')
+
+/** cancel a submitted/approved request: status → Canceled, hours go back, open approval task closes */
+export function cancelTimeOff(r: any, isAgent: boolean) {
+  db.update('workday.timeoff', r.id, { status: 'Canceled', canceledAt: new Date().toISOString(), updatedBy: isAgent ? 'hworker' : undefined })
+  const key = BAL_KEY[r.type]
+  if (key) db.update('workday.workers', r.workerId, (w) => ({ balances: { ...w.balances, [key]: Math.round(((w.balances?.[key] ?? 0) + r.totalDays) * 10) / 10 } }))
+  for (const t of db.get<any>('workday.tasks').filter((x) => x.link?.requestId === r.id && x.status === 'open')) db.update('workday.tasks', t.id, { status: 'done', completedAt: new Date().toISOString(), outcome: 'Canceled' })
+}
+
+const cancellable = (r: any) => (r.status === 'Submitted' || r.status === 'Approved') && (r.days[r.days.length - 1]?.date ?? '') >= isoDate(new Date())
+
 export function TimeOffHub({ nav }: { nav: Nav }) {
   const me = useMe()
+  const { isAgent } = useDesk()
+  const [view, setView] = useState<'overview' | 'balance' | 'holidays' | 'leave'>('overview')
+  const [dlg, setDlg] = useState<null | 'cancel' | 'correct' | 'absence'>(null)
+  const [msg, setMsg] = useState('')
   const reqs = useCollection<any>('workday.timeoff')
     .filter((r) => r.workerId === 'wd-alex')
     .sort((a, b) => (b.days[0]?.date ?? '').localeCompare(a.days[0]?.date ?? ''))
@@ -35,13 +51,15 @@ export function TimeOffHub({ nav }: { nav: Nav }) {
         <div className="space-y-6">
           <Card title="Request">
             <div className="px-3 pb-3">
-              {[
-                ['Request Time Off', 'workday-timeoff-new'],
-                ['Request Absence', undefined],
-                ['Correct My Time Off', undefined],
-                ['Cancel Time Off', undefined],
-              ].map(([t, a]) => (
-                <button key={t} data-agent={a} onClick={() => a && nav({ page: 'timeoff-request' })} className="w-full text-left px-3 h-10 rounded-lg hover:bg-[#F6F7F8] text-[14px] font-bold text-[#0875E1]">
+              {(
+                [
+                  ['Request Time Off', 'workday-timeoff-new', () => nav({ page: 'timeoff-request' })],
+                  ['Request Absence', undefined, () => setDlg('absence')],
+                  ['Correct My Time Off', undefined, () => setDlg('correct')],
+                  ['Cancel Time Off', undefined, () => setDlg('cancel')],
+                ] as [string, string | undefined, () => void][]
+              ).map(([t, a, fn]) => (
+                <button key={t} data-agent={a} onClick={fn} className="w-full text-left px-3 h-10 rounded-lg hover:bg-[#F6F7F8] text-[14px] font-bold text-[#0875E1]">
                   {t}
                 </button>
               ))}
@@ -49,8 +67,15 @@ export function TimeOffHub({ nav }: { nav: Nav }) {
           </Card>
           <Card title="View">
             <div className="px-3 pb-3">
-              {['Time Off Balance', 'My Time Off', 'My Leave Results', 'Holiday Calendar'].map((t) => (
-                <button key={t} className="w-full text-left px-3 h-10 rounded-lg hover:bg-[#F6F7F8] text-[14px] font-bold text-[#0875E1]">
+              {(
+                [
+                  ['Time Off Balance', 'balance'],
+                  ['My Time Off', 'overview'],
+                  ['My Leave Results', 'leave'],
+                  ['Holiday Calendar', 'holidays'],
+                ] as const
+              ).map(([t, v]) => (
+                <button key={t} onClick={() => setView(v)} className={`w-full text-left px-3 h-10 rounded-lg text-[14px] font-bold text-[#0875E1] ${view === v ? 'bg-[#D7EAFC]' : 'hover:bg-[#F6F7F8]'}`}>
                   {t}
                 </button>
               ))}
@@ -58,6 +83,16 @@ export function TimeOffHub({ nav }: { nav: Nav }) {
           </Card>
         </div>
         <div className="space-y-6 min-w-0">
+          {msg && <Success onClose={() => setMsg('')}>{msg}</Success>}
+          {view === 'balance' && <BalanceByPeriod me={me} reqs={reqs} onBack={() => setView('overview')} />}
+          {view === 'holidays' && <HolidayCalendar onBack={() => setView('overview')} />}
+          {view === 'leave' && (
+            <Card title="My Leave Results" action={<Btn size="sm" variant="tertiary" onClick={() => setView('overview')}>Back to Overview</Btn>}>
+              <div className="px-6 pb-6 text-[14px] text-[#5E6A75]">You have no leaves of absence on record. To request parental, medical or personal leave, use Request Absence.</div>
+            </Card>
+          )}
+          {view === 'overview' && (
+          <>
           <Card title={`Time Off Balance as of ${asOf}`} agent="workday-balance">
             <div className="grid grid-cols-3 gap-4 px-6 pb-6">
               {TYPES.map((t) => (
@@ -95,7 +130,7 @@ export function TimeOffHub({ nav }: { nav: Nav }) {
                       <td>{r.type}</td>
                       <td>{fmtDays(r.totalDays)}</td>
                       <td>
-                        <Pill tone={r.status === 'Approved' ? 'green' : r.status === 'Submitted' ? 'orange' : 'gray'}>{r.status === 'Submitted' ? 'Submitted' : r.status}</Pill>
+                        <Pill tone={toneOf(r.status)}>{r.status === 'Submitted' ? 'Submitted' : r.status}</Pill>
                         {r.createdBy === 'hworker' && <span className="ml-2"><HWorkerChip /></span>}
                       </td>
                       <td className="text-[#5E6A75] truncate max-w-[220px]">{r.comment}</td>
@@ -105,9 +140,244 @@ export function TimeOffHub({ nav }: { nav: Nav }) {
               </tbody>
             </table>
           </Card>
+          </>
+          )}
         </div>
       </div>
+      {(dlg === 'cancel' || dlg === 'correct') && (
+        <PickRequestModal
+          mode={dlg}
+          reqs={reqs}
+          onClose={() => setDlg(null)}
+          onDone={(m) => {
+            setDlg(null)
+            setMsg(m)
+          }}
+          isAgent={isAgent}
+        />
+      )}
+      {dlg === 'absence' && (
+        <AbsenceModal
+          onClose={() => setDlg(null)}
+          onDone={(m) => {
+            setDlg(null)
+            setMsg(m)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function BalanceByPeriod({ me, reqs, onBack }: { me: any; reqs: any[]; onBack: () => void }) {
+  const y = new Date().getFullYear()
+  const taken = (type: string) => reqs.filter((r) => r.type === type && (r.status === 'Approved' || r.status === 'Submitted') && r.days[0]?.date.startsWith(String(y))).reduce((n, r) => n + r.totalDays, 0)
+  return (
+    <Card title={`Time Off Balance by Period · ${y}`} action={<Btn size="sm" variant="tertiary" onClick={onBack}>Back to Overview</Btn>}>
+      <table className="w-full text-[14px]">
+        <thead>
+          <tr className="text-left text-[12.5px] text-[#5E6A75] bg-[#F6F7F8] border-y border-[#E8EBED]">
+            <th className="px-6 h-10 font-bold">Plan</th>
+            <th className="font-bold text-right">Beginning Balance</th>
+            <th className="font-bold text-right">Accrued</th>
+            <th className="font-bold text-right">Taken / Requested</th>
+            <th className="font-bold text-right pr-6">Ending Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {TYPES.map((t) => {
+            const end = me?.balances?.[BAL_KEY[t]] ?? 0
+            const used = taken(t)
+            const accrued = t === 'Vacation' ? 13.75 : t === 'Sick' ? 7 : 2
+            const begin = Math.round((end + used - accrued) * 10) / 10
+            return (
+              <tr key={t} className="border-b border-[#F0F1F2]">
+                <td className="px-6 h-12 font-bold">{t}</td>
+                <td className="text-right">{fmtDays(Math.max(0, begin))}</td>
+                <td className="text-right">{fmtDays(accrued)}</td>
+                <td className="text-right">{fmtDays(used)}</td>
+                <td className="text-right pr-6 font-bold">{fmtDays(end)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </Card>
+  )
+}
+
+function HolidayCalendar({ onBack }: { onBack: () => void }) {
+  const [y, setY] = useState(new Date().getFullYear())
+  const list = Object.entries(holidays(y)).sort(([a], [b]) => a.localeCompare(b))
+  return (
+    <Card
+      title={`Holiday Calendar · Northwind US ${y}`}
+      action={
+        <div className="flex items-center gap-1">
+          <button aria-label="Previous year" onClick={() => setY(y - 1)} className="w-8 h-8 rounded-full hover:bg-[#F0F1F2] flex items-center justify-center">
+            <ChevronLeft size={18} />
+          </button>
+          <button aria-label="Next year" onClick={() => setY(y + 1)} className="w-8 h-8 rounded-full hover:bg-[#F0F1F2] flex items-center justify-center">
+            <ChevronRight size={18} />
+          </button>
+          <Btn size="sm" variant="tertiary" onClick={onBack}>Back to Overview</Btn>
+        </div>
+      }
+    >
+      <table className="w-full text-[14px]">
+        <tbody>
+          {list.map(([d, n]) => (
+            <tr key={d} className={`border-t border-[#F0F1F2] ${d < isoDate(new Date()) ? 'text-[#5E6A75]' : ''}`}>
+              <td className="px-6 h-11 w-[160px] font-bold">{fmtMDY(d)}</td>
+              <td className="w-[140px]">{new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })}</td>
+              <td>{n}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  )
+}
+
+function PickRequestModal({ mode, reqs, onClose, onDone, isAgent }: { mode: 'cancel' | 'correct'; reqs: any[]; onClose: () => void; onDone: (m: string) => void; isAgent: boolean }) {
+  const list = reqs.filter(cancellable)
+  const [sel, setSel] = useState(list[0]?.id ?? '')
+  const r = list.find((x) => x.id === sel)
+  const [type, setType] = useState(r?.type ?? 'Vacation')
+  const [comment, setComment] = useState(r?.comment ?? '')
+  const pick = (id: string) => {
+    setSel(id)
+    const x = list.find((q) => q.id === id)
+    setType(x?.type ?? 'Vacation')
+    setComment(x?.comment ?? '')
+  }
+  const go = () => {
+    if (!r) return
+    if (mode === 'cancel') {
+      cancelTimeOff(r, isAgent)
+      onDone(`Time off request ${r.id.toUpperCase()} canceled. ${fmtDays(r.totalDays)} returned to your ${r.type} balance.`)
+    } else {
+      const from = BAL_KEY[r.type]
+      const to = BAL_KEY[type]
+      if (from !== to) {
+        db.update('workday.workers', r.workerId, (w) => ({ balances: { ...w.balances, [from]: Math.round(((w.balances?.[from] ?? 0) + r.totalDays) * 10) / 10, [to]: Math.round(((w.balances?.[to] ?? 0) - r.totalDays) * 10) / 10 } }))
+      }
+      db.update('workday.timeoff', r.id, { type, comment, correctedAt: new Date().toISOString() })
+      onDone(`Time off request ${r.id.toUpperCase()} corrected.`)
+    }
+  }
+  return (
+    <Modal
+      title={mode === 'cancel' ? 'Cancel Time Off' : 'Correct My Time Off'}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="primary" disabled={!r} onClick={go}>
+            {mode === 'cancel' ? 'Cancel Request' : 'Submit'}
+          </Btn>
+          <Btn onClick={onClose}>Close</Btn>
+        </>
+      }
+    >
+      {list.length === 0 ? (
+        <div className="text-[#5E6A75]">You have no upcoming time off that can be {mode === 'cancel' ? 'canceled' : 'corrected'}.</div>
+      ) : (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            {list.map((x) => (
+              <label key={x.id} className={`flex items-center gap-3 px-4 h-12 rounded-xl border cursor-pointer ${sel === x.id ? 'border-[#0875E1] bg-[#F2F8FE]' : 'border-[#E8EBED]'}`}>
+                <input type="radio" name="req" checked={sel === x.id} onChange={() => pick(x.id)} className="accent-[#0875E1]" />
+                <span className="flex-1">
+                  <b>{x.type}</b> · {fmtMDY(x.days[0].date)}
+                  {x.days.length > 1 ? ` – ${fmtMDY(x.days[x.days.length - 1].date)}` : ''} · {fmtDays(x.totalDays)}
+                </span>
+                <Pill tone={toneOf(x.status)}>{x.status}</Pill>
+              </label>
+            ))}
+          </div>
+          {mode === 'correct' && r && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-[14px] font-medium mb-1.5">Type</div>
+                <select aria-label="Corrected time off type" value={type} onChange={(e) => setType(e.target.value)} className={inputCls}>
+                  {TYPES.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-[14px] font-medium mb-1.5">Comment</div>
+                <input aria-label="Corrected comment" value={comment} onChange={(e) => setComment(e.target.value)} className={inputCls} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+const LEAVES = ['Parental Leave', 'Medical Leave (FMLA)', 'Personal Leave', 'Military Leave', 'Bereavement Leave']
+
+function AbsenceModal({ onClose, onDone }: { onClose: () => void; onDone: (m: string) => void }) {
+  const { isAgent } = useDesk()
+  const [type, setType] = useState('')
+  const [first, setFirst] = useState(isoDate(new Date(Date.now() + 14 * 864e5)))
+  const [last, setLast] = useState(isoDate(new Date(Date.now() + 28 * 864e5)))
+  const [reason, setReason] = useState('')
+  const [err, setErr] = useState('')
+  const submit = () => {
+    if (!type) return setErr('Leave Type is required.')
+    if (!first || !last || last < first) return setErr('Enter a valid first and last day of leave.')
+    const id = `lv-${Math.floor(1000 + Math.random() * 9000)}`
+    db.insert('workday.leaves', { id, workerId: 'wd-alex', type, first, last, reason, status: 'Submitted', submittedAt: new Date().toISOString(), createdBy: isAgent ? 'hworker' : undefined })
+    db.insert(
+      'workday.tasks',
+      { id: uid('wt'), assignee: ME.managerId ?? 'priya', title: `Leave of Absence: ${ME.name} — ${type}`, process: 'Request Leave of Absence', step: 'Approval by Manager', fromId: ME.id, receivedAt: new Date().toISOString(), due: new Date(Date.now() + 3 * 864e5).toISOString(), status: 'open', createdBy: isAgent ? 'hworker' : undefined },
+      { prepend: true },
+    )
+    onDone(`${type} request submitted for ${fmtMDY(first)} – ${fmtMDY(last)}. Up next: approval by ${person(ME.managerId ?? 'priya').name}, then the Leave Partner.`)
+  }
+  return (
+    <Modal
+      title="Request Absence"
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="primary" onClick={submit}>
+            Submit
+          </Btn>
+          <Btn onClick={onClose}>Cancel</Btn>
+        </>
+      }
+    >
+      {err && <div className="rounded-lg border border-[#DE2E21] bg-[#FDE2E0] px-4 py-2.5 text-[13.5px] text-[#A31B12] font-medium mb-3">{err}</div>}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="col-span-2">
+          <div className="text-[14px] font-medium mb-1.5">
+            Leave Type<span className="text-[#DE2E21]">*</span>
+          </div>
+          <select aria-label="Leave type" value={type} onChange={(e) => (setType(e.target.value), setErr(''))} className={inputCls}>
+            <option value="">select one</option>
+            {LEAVES.map((l) => (
+              <option key={l}>{l}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div className="text-[14px] font-medium mb-1.5">First Day of Leave</div>
+          <input type="date" aria-label="First day of leave" value={first} onChange={(e) => setFirst(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <div className="text-[14px] font-medium mb-1.5">Estimated Last Day of Leave</div>
+          <input type="date" aria-label="Last day of leave" value={last} onChange={(e) => setLast(e.target.value)} className={inputCls} />
+        </div>
+        <div className="col-span-2">
+          <div className="text-[14px] font-medium mb-1.5">Reason</div>
+          <textarea aria-label="Leave reason" value={reason} onChange={(e) => setReason(e.target.value)} className="w-full h-20 px-3 py-2 rounded-md border border-[#A1AAB3] outline-none focus:border-[#0875E1] text-[14px] resize-none" />
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -126,6 +396,15 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
   const [type, setType] = useState('')
   const [comment, setComment] = useState('')
   const [err, setErr] = useState('')
+  const [calView, setCalView] = useState<'month' | 'week'>('month')
+  const [weekStart, setWeekStart] = useState(() => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    d.setDate(d.getDate() - d.getDay())
+    return d
+  })
+  const [byPeriod, setByPeriod] = useState(false)
+  const [files, setFiles] = useState<string[]>([])
 
   const taken = useMemo(() => {
     const m: Record<string, { type: string; status: string }> = {}
@@ -134,10 +413,18 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
   }, [reqs])
 
   const cells = useMemo(() => {
+    if (calView === 'week') return Array.from({ length: 7 }, (_, i) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i))
     const start = new Date(month)
     start.setDate(1 - start.getDay())
     return Array.from({ length: 42 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i))
-  }, [month])
+  }, [month, calView, weekStart])
+  const shift = (dir: 1 | -1) => {
+    if (calView === 'week') {
+      const n = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7 * dir)
+      setWeekStart(n)
+      setMonth(new Date(n.getFullYear(), n.getMonth(), 1))
+    } else setMonth(new Date(month.getFullYear(), month.getMonth() + dir, 1))
+  }
   const hol = holidays(month.getFullYear())
 
   const toggle = (iso: string) => setSel((s) => (s.includes(iso) ? s.filter((x) => x !== iso) : [...s, iso].sort()))
@@ -162,6 +449,7 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
       submittedAt: new Date().toISOString(),
       approverId: ME.managerId ?? 'priya',
       createdBy: isAgent ? 'hworker' : undefined,
+      ...(files.length ? { attachments: files } : {}),
     }
     db.insert('workday.timeoff', rec)
     db.update('workday.workers', 'wd-alex', (w) => ({ balances: { ...w.balances, [BAL_KEY[type]]: Math.round(((w.balances?.[BAL_KEY[type]] ?? 0) - days) * 10) / 10 } }))
@@ -215,7 +503,23 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
                     </div>
                   ))}
                 </div>
-                <button className="mt-4 text-[13px] font-bold text-[#0875E1] hover:underline">View Balance by Period</button>
+                <button onClick={() => setByPeriod((b) => !b)} className="mt-4 text-[13px] font-bold text-[#0875E1] hover:underline">
+                  {byPeriod ? 'Hide Balance by Period' : 'View Balance by Period'}
+                </button>
+                {byPeriod && (
+                  <div className="mt-3 rounded-lg bg-[#F6F7F8] p-3 text-[12.5px] space-y-1">
+                    {[0, 1, 2].map((i) => {
+                      const d = new Date(new Date().getFullYear(), new Date().getMonth() + i + 1, 0)
+                      const v = (me?.balances?.vacation ?? 0) + 1.25 * i
+                      return (
+                        <div key={i} className="flex justify-between">
+                          <span>Vacation as of {fmtMDY(isoDate(d))}</span>
+                          <b>{fmtDays(Math.round(v * 100) / 100)}</b>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
               <div className="bg-white rounded-2xl border border-[#E8EBED] p-5">
                 <div className="text-[15px] font-bold mb-3">Legend</div>
@@ -235,20 +539,49 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
 
             <div className="bg-white rounded-2xl border border-[#E8EBED] p-5 min-w-0">
               <div className="flex items-center gap-2 mb-4">
-                <Btn size="sm" onClick={() => setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>Today</Btn>
-                <button data-agent="workday-cal-prev" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="w-8 h-8 rounded-full hover:bg-[#F0F1F2] flex items-center justify-center">
+                <Btn
+                  size="sm"
+                  onClick={() => {
+                    const t = new Date()
+                    t.setHours(0, 0, 0, 0)
+                    setMonth(new Date(t.getFullYear(), t.getMonth(), 1))
+                    setWeekStart(new Date(t.getFullYear(), t.getMonth(), t.getDate() - t.getDay()))
+                  }}
+                >
+                  Today
+                </Btn>
+                <button data-agent="workday-cal-prev" aria-label="Previous month" onClick={() => shift(-1)} className="w-8 h-8 rounded-full hover:bg-[#F0F1F2] flex items-center justify-center">
                   <ChevronLeft size={18} />
                 </button>
-                <button data-agent="workday-cal-next" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="w-8 h-8 rounded-full hover:bg-[#F0F1F2] flex items-center justify-center">
+                <button data-agent="workday-cal-next" aria-label="Next month" onClick={() => shift(1)} className="w-8 h-8 rounded-full hover:bg-[#F0F1F2] flex items-center justify-center">
                   <ChevronRight size={18} />
                 </button>
                 <div className="text-[20px] font-bold ml-2" data-agent="workday-cal-month">
-                  {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  {calView === 'week'
+                    ? `${cells[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${cells[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                 </div>
                 <div className="flex-1" />
                 <div className="flex rounded-full border border-[#A1AAB3] overflow-hidden text-[13px] font-bold">
-                  <span className="px-4 h-8 flex items-center bg-[#333] text-white">Month</span>
-                  <span className="px-4 h-8 flex items-center">Week</span>
+                  <button
+                    onClick={() => setCalView('month')}
+                    className={`px-4 h-8 flex items-center ${calView === 'month' ? 'bg-[#333] text-white' : 'hover:bg-[#F0F1F2]'}`}
+                  >
+                    Month
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (calView !== 'week') {
+                        const t = new Date()
+                        const base = t.getMonth() === month.getMonth() && t.getFullYear() === month.getFullYear() ? t : month
+                        setWeekStart(new Date(base.getFullYear(), base.getMonth(), base.getDate() - base.getDay()))
+                      }
+                      setCalView('week')
+                    }}
+                    className={`px-4 h-8 flex items-center ${calView === 'week' ? 'bg-[#333] text-white' : 'hover:bg-[#F0F1F2]'}`}
+                  >
+                    Week
+                  </button>
                 </div>
               </div>
               <div className="grid grid-cols-7 border-t border-l border-[#E8EBED]">
@@ -259,7 +592,7 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
                 ))}
                 {cells.map((d) => {
                   const iso = isoDate(d)
-                  const inMonth = d.getMonth() === month.getMonth()
+                  const inMonth = calView === 'week' || d.getMonth() === month.getMonth()
                   const isSel = sel.includes(iso)
                   const h = hol[iso] ?? holidayName(iso)
                   const wk = isWeekend(iso)
@@ -272,7 +605,7 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
                       aria-label={d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                       aria-pressed={isSel}
                       onClick={() => toggle(iso)}
-                      className={`relative h-[92px] p-1.5 text-left align-top border-r border-b border-[#E8EBED] flex flex-col ${isSel ? 'bg-[#D7EAFC]' : wk ? 'bg-[#F6F7F8]' : 'bg-white hover:bg-[#F6F7F8]'} ${inMonth ? '' : 'opacity-45'}`}
+                      className={`relative ${calView === 'week' ? 'h-[220px]' : 'h-[92px]'} p-1.5 text-left align-top border-r border-b border-[#E8EBED] flex flex-col ${isSel ? 'bg-[#D7EAFC]' : wk ? 'bg-[#F6F7F8]' : 'bg-white hover:bg-[#F6F7F8]'} ${inMonth ? '' : 'opacity-45'}`}
                     >
                       {isSel && <span className="absolute inset-0 border-2 border-[#0875E1] pointer-events-none" />}
                       <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[13px] ${isToday ? 'bg-[#0875E1] text-white font-bold' : isSel ? 'font-bold text-[#005CB9]' : 'text-[#333]'}`}>{d.getDate()}</span>
@@ -395,9 +728,39 @@ export function RequestTimeOff({ nav }: { nav: Nav }) {
               </div>
               <div>
                 <div className="text-[14px] font-medium mb-1.5">Attachments</div>
-                <div className="h-16 rounded-lg border-2 border-dashed border-[#CED3D9] flex items-center justify-center text-[13.5px] text-[#5E6A75] gap-2">
+                <label
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const names = Array.from(e.dataTransfer.files).map((f) => f.name)
+                    if (names.length) setFiles((fs) => [...fs, ...names])
+                  }}
+                  className="h-16 rounded-lg border-2 border-dashed border-[#CED3D9] flex items-center justify-center text-[13.5px] text-[#5E6A75] gap-2 cursor-pointer hover:bg-[#F6F7F8]"
+                >
                   <Paperclip size={16} /> Drop files here or <span className="text-[#0875E1] font-bold">Select files</span>
-                </div>
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const names = Array.from(e.target.files ?? []).map((f) => f.name)
+                      if (names.length) setFiles((fs) => [...fs, ...names])
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+                {files.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {files.map((f, i) => (
+                      <div key={f + i} className="flex items-center gap-2 text-[13.5px]">
+                        <Paperclip size={14} className="text-[#5E6A75]" /> <span className="flex-1">{f}</span>
+                        <button aria-label={`Remove ${f}`} onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))} className="text-[#5E6A75] hover:text-[#DE2E21]">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-3 px-7 py-5 border-t border-[#E8EBED] mt-3">
@@ -478,14 +841,17 @@ export function TimeOffDone({ nav, requestId }: { nav: Nav; requestId: string })
 
 export function TimeOffDetail({ nav, requestId }: { nav: Nav; requestId: string }) {
   const r = useRecord<any>('workday.timeoff', requestId)
+  const { isAgent } = useDesk()
+  const [confirm, setConfirm] = useState(false)
   if (!r) return <div className="p-10 text-[14px] text-[#5E6A75]">Request not found.</div>
   const w = db.find<any>('workday.workers', r.workerId)
   const mgr = person(r.approverId)
   const approved = r.status === 'Approved'
+  const closed = r.status === 'Canceled' || r.status === 'Denied' || r.status === 'Sent Back'
   const steps = [
     { step: 'Initiation', who: w?.name ?? '', status: 'Successfully Completed', at: r.submittedAt, icon: 'done' },
-    { step: 'Approval by Manager', who: mgr.name, status: approved ? 'Approved' : 'Awaiting Action', at: approved ? r.submittedAt : null, icon: approved ? 'done' : 'wait' },
-    { step: 'Notification to Time Off Partner', who: 'Time Off Partner — Northwind US', status: approved ? 'Successfully Completed' : 'Not Started', at: null, icon: approved ? 'done' : 'todo' },
+    { step: 'Approval by Manager', who: mgr.name, status: approved ? 'Approved' : closed && r.status !== 'Canceled' ? r.status : r.status === 'Canceled' ? 'Canceled by Worker' : 'Awaiting Action', at: approved ? r.submittedAt : r.decidedAt ?? r.canceledAt ?? null, icon: approved ? 'done' : closed ? 'todo' : 'wait' },
+    { step: 'Notification to Time Off Partner', who: 'Time Off Partner — Northwind US', status: approved ? 'Successfully Completed' : closed ? 'Not Required' : 'Not Started', at: null, icon: approved ? 'done' : 'todo' },
   ]
   return (
     <div className="max-w-[1100px] mx-auto px-10 py-8" data-agent="workday-timeoff-detail">
@@ -501,8 +867,38 @@ export function TimeOffDetail({ nav, requestId }: { nav: Nav; requestId: string 
             {r.createdBy === 'hworker' && <HWorkerChip text="Submitted via H-Worker" />}
           </div>
         </div>
-        <Pill tone={approved ? 'green' : 'orange'}>{approved ? 'Successfully Completed' : 'In Progress'}</Pill>
+        <div className="flex items-center gap-2">
+          {r.workerId === 'wd-alex' && cancellable(r) && (
+            <Btn size="sm" agent="workday-timeoff-cancel" onClick={() => setConfirm(true)}>
+              Cancel Request
+            </Btn>
+          )}
+          <Pill tone={approved ? 'green' : closed ? 'gray' : 'orange'}>{approved ? 'Successfully Completed' : closed ? r.status : 'In Progress'}</Pill>
+        </div>
       </div>
+      {confirm && (
+        <Modal
+          title="Cancel Time Off Request"
+          onClose={() => setConfirm(false)}
+          footer={
+            <>
+              <Btn
+                variant="primary"
+                onClick={() => {
+                  cancelTimeOff(r, isAgent)
+                  setConfirm(false)
+                }}
+              >
+                Cancel Request
+              </Btn>
+              <Btn onClick={() => setConfirm(false)}>Keep Request</Btn>
+            </>
+          }
+        >
+          Cancel your {r.type} request for {fmtMDY(r.days[0].date)}
+          {r.days.length > 1 ? ` – ${fmtMDY(r.days[r.days.length - 1].date)}` : ''}? {fmtDays(r.totalDays)} will be returned to your balance and {mgr.name} will be notified.
+        </Modal>
+      )}
       <div className="grid grid-cols-[minmax(0,1fr)_340px] gap-6">
         <Card title="Details">
           <div className="grid grid-cols-2 gap-x-8 gap-y-4 px-6 pb-6 text-[14px]">
@@ -513,6 +909,8 @@ export function TimeOffDetail({ nav, requestId }: { nav: Nav; requestId: string 
               ['Total', `${r.totalDays * 8} Hours (${fmtDays(r.totalDays)})`],
               ['Status', r.status],
               ['Comment', r.comment || '—'],
+              ...(r.decisionComment ? [['Approver Comment', r.decisionComment]] : []),
+              ...(r.attachments?.length ? [['Attachments', r.attachments.join(', ')]] : []),
             ].map(([k, v]) => (
               <div key={k}>
                 <div className="text-[12.5px] text-[#5E6A75]">{k}</div>

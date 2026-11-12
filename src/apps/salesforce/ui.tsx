@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import {
   Building2,
   CalendarDays,
@@ -21,6 +21,8 @@ import {
   UserStar,
   Users,
   History,
+  Briefcase,
+  StickyNote,
 } from 'lucide-react'
 import { person } from '@/data/people'
 import { logoUrl } from '@/os/registry'
@@ -30,6 +32,8 @@ export type Route =
   | { page: 'list'; object: string; filter?: string }
   | { page: 'record'; object: string; id: string }
   | { page: 'search'; q: string }
+  | { page: 'report'; id: string }
+  | { page: 'setup'; tab?: string }
 
 export const NavCtx = createContext<{ go: (r: Route) => void; route: Route }>({ go: () => {}, route: { page: 'home' } })
 export const useNav = () => useContext(NavCtx)
@@ -56,6 +60,8 @@ export const OBJ: Record<string, { color: string; icon: any; label: string; plur
   Quote: { color: '#88C651', icon: ReceiptText, label: 'Quote', plural: 'Quotes', key: '0Q0' },
   ContactRole: { color: '#A094ED', icon: Users, label: 'Contact Role', plural: 'Contact Roles', key: '' },
   History: { color: '#7F8DE1', icon: History, label: 'History', plural: 'History', key: '' },
+  Case: { color: '#F2CF5B', icon: Briefcase, label: 'Case', plural: 'Cases', key: '500' },
+  Note: { color: '#E6D478', icon: StickyNote, label: 'Note', plural: 'Notes', key: '002' },
 }
 
 export function ObjIcon({ type, size = 32, className = '' }: { type: string; size?: number; className?: string }) {
@@ -131,7 +137,8 @@ export function Btn({
 }
 
 /** button group like [New Event | New Task | Edit | ▼] */
-export function BtnGroup({ items }: { items: { label: string; agent?: string; onClick?: () => void }[] }) {
+export function BtnGroup({ items, more }: { items: { label: string; agent?: string; onClick?: () => void }[]; more?: MenuItem[] }) {
+  const [open, setOpen] = useState(false)
   return (
     <div className="inline-flex">
       {items.map((it, i) => (
@@ -144,14 +151,82 @@ export function BtnGroup({ items }: { items: { label: string; agent?: string; on
           {it.label}
         </button>
       ))}
-      <button className="h-8 w-8 -ml-px border border-[#C9C9C9] bg-white text-[#747474] rounded-r-[4px] hover:bg-[#F3F3F3] flex items-center justify-center" aria-label="Show more actions">
-        <ChevronDown size={14} />
-      </button>
+      <span className="relative inline-flex -ml-px">
+        <button onClick={() => setOpen(!open)} className={`h-8 w-8 border border-[#C9C9C9] text-[#747474] rounded-r-[4px] hover:bg-[#F3F3F3] flex items-center justify-center ${open ? 'bg-[#F3F3F3]' : 'bg-white'}`} aria-label="Show more actions">
+          <ChevronDown size={14} />
+        </button>
+        {open && <Menu items={more?.length ? more : [{ label: 'No more actions', disabled: true }]} onClose={() => setOpen(false)} className="right-0 top-9" />}
+      </span>
     </div>
   )
 }
 
-export function Card({ title, icon, count, actions, children, className = '', footer, agent }: { title: ReactNode; icon?: string; count?: number; actions?: ReactNode; children?: ReactNode; className?: string; footer?: ReactNode; agent?: string }) {
+/* ───────────── dropdown menu ───────────── */
+export type MenuItem = { label: ReactNode; onClick?: () => void; agent?: string; disabled?: boolean; divider?: boolean; header?: boolean; checked?: boolean; icon?: ReactNode }
+
+/** close on mousedown outside `ref` (ignoring clicks on other desktops) */
+export function useOutside(ref: RefObject<HTMLElement | null>, onClose: () => void, active = true, parent = false) {
+  const cb = useRef(onClose)
+  cb.current = onClose
+  useEffect(() => {
+    if (!active) return
+    const h = (e: MouseEvent) => {
+      const desk = ref.current?.closest('[data-desk]')
+      if (desk && !desk.contains(e.target as Node)) return
+      const box = parent ? (ref.current?.parentElement ?? ref.current) : ref.current
+      if (box && !box.contains(e.target as Node)) cb.current()
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [active])
+}
+
+export function Menu({ items, onClose, className = 'right-0 top-9', width = 220 }: { items: MenuItem[]; onClose: () => void; className?: string; width?: number }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useOutside(ref, onClose, true, true)
+  return (
+    <div ref={ref} role="menu" className={`absolute z-50 bg-white rounded-[4px] border border-[#E5E5E5] py-1 text-left ${className}`} style={{ width, boxShadow: '0 2px 8px rgba(0,0,0,0.16)' }}>
+      {items.map((it, i) =>
+        it.divider ? (
+          <div key={i} className="my-1 border-t border-[#E5E5E5]" />
+        ) : it.header ? (
+          <div key={i} className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wide text-[#444]">{it.label}</div>
+        ) : (
+          <button
+            key={i}
+            role="menuitem"
+            data-agent={it.agent}
+            disabled={it.disabled}
+            onClick={() => {
+              onClose()
+              it.onClick?.()
+            }}
+            className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-[#181818] hover:bg-[#F3F3F3] disabled:text-[#AEAEAE] disabled:hover:bg-white text-left whitespace-nowrap"
+          >
+            {it.checked != null && <span className="w-3.5 text-[#0176D3]">{it.checked ? <Check size={13} strokeWidth={3} /> : null}</span>}
+            {it.icon}
+            <span className="truncate">{it.label}</span>
+          </button>
+        ),
+      )}
+    </div>
+  )
+}
+
+/** button + dropdown menu */
+export function MenuButton({ children, items, className = '', label, agent, menuClass, width }: { children: ReactNode; items: MenuItem[] | (() => MenuItem[]); className?: string; label?: string; agent?: string; menuClass?: string; width?: number }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="relative inline-flex">
+      <button data-agent={agent} aria-label={label} onClick={() => setOpen(!open)} className={className}>
+        {children}
+      </button>
+      {open && <Menu items={typeof items === 'function' ? items() : items} onClose={() => setOpen(false)} className={menuClass} width={width} />}
+    </span>
+  )
+}
+
+export function Card({ title, icon, count, actions, children, className = '', footer, agent, onFooter }: { title: ReactNode; icon?: string; count?: number; actions?: ReactNode; children?: ReactNode; className?: string; footer?: ReactNode; agent?: string; onFooter?: () => void }) {
   return (
     <section data-agent={agent} className={`bg-white rounded-[4px] border border-[#C9C9C9] ${className}`} style={{ boxShadow: '0 2px 2px 0 rgba(0,0,0,0.10)' }}>
       <header className="flex items-center gap-3 px-4 pt-3 pb-2">
@@ -163,7 +238,7 @@ export function Card({ title, icon, count, actions, children, className = '', fo
         {actions}
       </header>
       {children}
-      {footer && <footer className="border-t border-[#E5E5E5] h-10 flex items-center justify-center text-[13px] text-[#0176D3] hover:underline cursor-pointer">{footer}</footer>}
+      {footer && <footer onClick={onFooter} className="border-t border-[#E5E5E5] h-10 flex items-center justify-center text-[13px] text-[#0176D3] hover:underline cursor-pointer">{footer}</footer>}
     </section>
   )
 }

@@ -4,7 +4,9 @@ import { db, uid, useCollection } from '@/db/db'
 import { useDesk } from '@/os/context'
 import { ME, person } from '@/data/people'
 import { isoDate } from '@/data/time'
-import { Btn, HWChip, Link, inputCls, labelCls, sfDate, useNav } from './ui'
+import { Btn, HWChip, Link, MenuButton, inputCls, labelCls, sfDate, useNav, type MenuItem } from './ui'
+import { Modal } from './record'
+import { useActions } from './forms'
 
 const TYPE_META: Record<string, { color: string; icon: any; verb: string }> = {
   call: { color: '#48C3CC', icon: Phone, verb: 'logged a call' },
@@ -53,6 +55,11 @@ export function ActivityPanel({
   const [status, setStatus] = useState('Not Started')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [expandAll, setExpandAll] = useState(false)
+  const [range, setRange] = useState<'all' | 'last7' | 'next7' | 'last30'>('all')
+  const [types, setTypes] = useState<Set<string>>(new Set(['call', 'task', 'event', 'email']))
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [allOpen, setAllOpen] = useState(false)
+  const [spin, setSpin] = useState(false)
 
   const reset = () => {
     setSubject('')
@@ -88,8 +95,16 @@ export function ActivityPanel({
   const items = useMemo(() => {
     const a = acts.filter((x) => x.whatId === whatId).map((x) => ({ ...x, kind: x.type, when: x.date }))
     const t = tasks.filter((x) => x.whatId === whatId).map((x) => ({ ...x, kind: 'task', when: x.dueDate + 'T12:00:00' }))
-    return [...a, ...t].sort((x, y) => +new Date(y.when) - +new Date(x.when))
-  }, [acts, tasks, whatId])
+    const now = Date.now()
+    const inRange = (w: string) => {
+      const d = +new Date(w)
+      if (range === 'last7') return d <= now && d >= now - 7 * 86400000
+      if (range === 'next7') return d >= now - 86400000 && d <= now + 7 * 86400000
+      if (range === 'last30') return d <= now && d >= now - 30 * 86400000
+      return true
+    }
+    return [...a, ...t].filter((x) => types.has(x.kind) && inRange(x.when)).sort((x, y) => +new Date(y.when) - +new Date(x.when))
+  }, [acts, tasks, whatId, range, types])
   const now = Date.now()
   const upcoming = items.filter((i) => (i.kind === 'task' && i.status !== 'Completed') || (i.kind === 'event' && +new Date(i.when) > now))
   const past = items.filter((i) => !upcoming.includes(i))
@@ -126,9 +141,17 @@ export function ActivityPanel({
             </button>
           ))}
           <div className="flex-1" />
-          <button className="self-center w-8 h-8 border border-[#C9C9C9] rounded-[4px] flex items-center justify-center text-[#747474]">
-            <ChevronDown size={14} />
-          </button>
+          <span className="self-center">
+            <MenuButton
+              label="More activity actions"
+              className="w-8 h-8 border border-[#C9C9C9] rounded-[4px] flex items-center justify-center text-[#747474] hover:bg-[#F3F3F3]"
+              menuClass="right-0 top-9"
+              width={180}
+              items={[...tabs.map(([m, l]) => ({ label: l, checked: mode === m, onClick: () => choose(m) })), { divider: true, label: '' }, { label: expandAll ? 'Collapse All' : 'Expand All', onClick: () => setExpandAll((x) => !x) }]}
+            >
+              <ChevronDown size={14} />
+            </MenuButton>
+          </span>
         </div>
         {!mode && (
           <div className="flex gap-2 py-3">
@@ -143,10 +166,21 @@ export function ActivityPanel({
                 <>
                   <div className="col-span-2">
                     <label className={labelCls}>To</label>
-                    <div className={`${inputCls} flex items-center`}>
-                      <span className="inline-flex items-center gap-1 h-6 px-2 rounded bg-[#F3F3F3] border border-[#E5E5E5] text-[12px]">
-                        {contacts.find((c) => c.id === who)?.name ?? 'Select'} <X size={11} />
-                      </span>
+                    <div className={`${inputCls} flex items-center gap-2`}>
+                      {who && contacts.some((c) => c.id === who) ? (
+                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded bg-[#F3F3F3] border border-[#E5E5E5] text-[12px]">
+                          {contacts.find((c) => c.id === who)?.name}
+                          {contacts.find((c) => c.id === who)?.email ? ` <${contacts.find((c) => c.id === who)?.email}>` : ''}
+                          <button aria-label="Remove recipient" onClick={() => setWho('')}>
+                            <X size={11} />
+                          </button>
+                        </span>
+                      ) : (
+                        <select aria-label="To" value="" onChange={(e) => setWho(e.target.value)} className="flex-1 h-6 outline-none bg-transparent text-[13px]">
+                          <option value="">Select a recipient…</option>
+                          {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      )}
                     </div>
                   </div>
                 </>
@@ -228,13 +262,49 @@ export function ActivityPanel({
       {/* timeline */}
       <div className="px-4 pb-4">
         <div className="flex items-center justify-between py-3 text-[12px] text-[#444]">
-          <span>Filters: All time • All activities • All types</span>
-          <button className="w-7 h-7 border border-[#C9C9C9] rounded-[4px] flex items-center justify-center text-[#747474]">
-            <Settings size={13} />
-          </button>
+          <span>
+            Filters: {{ all: 'All time', last7: 'Last 7 days', next7: 'Next 7 days', last30: 'Last 30 days' }[range]} • All activities • {types.size === 4 ? 'All types' : [...types].map((t) => t[0].toUpperCase() + t.slice(1) + 's').join(', ')}
+          </span>
+          <span className="relative">
+            <button aria-label="Filter timeline" onClick={() => setFilterOpen(!filterOpen)} className={`w-7 h-7 border rounded-[4px] flex items-center justify-center ${filterOpen ? 'border-[#0176D3] text-[#0176D3]' : 'border-[#C9C9C9] text-[#747474]'}`}>
+              <Settings size={13} />
+            </button>
+            {filterOpen && (
+              <div className="absolute right-0 top-8 z-30 w-[240px] bg-white rounded-[4px] border border-[#E5E5E5] p-3 text-[13px] text-[#181818]" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.16)' }}>
+                <div className="text-[12px] font-bold mb-1">Date range</div>
+                {([['all', 'All time'], ['last7', 'Last 7 days'], ['next7', 'Next 7 days'], ['last30', 'Last 30 days']] as const).map(([k, l]) => (
+                  <label key={k} className="flex items-center gap-2 py-0.5">
+                    <input type="radio" checked={range === k} onChange={() => setRange(k)} /> {l}
+                  </label>
+                ))}
+                <div className="text-[12px] font-bold mt-2 mb-1">Activities to show</div>
+                {(['call', 'email', 'event', 'task'] as const).map((k) => (
+                  <label key={k} className="flex items-center gap-2 py-0.5">
+                    <input
+                      type="checkbox"
+                      checked={types.has(k)}
+                      onChange={() =>
+                        setTypes((s) => {
+                          const n = new Set(s)
+                          if (n.has(k)) n.delete(k)
+                          else n.add(k)
+                          return n
+                        })
+                      }
+                    />
+                    {k[0].toUpperCase() + k.slice(1)}s
+                  </label>
+                ))}
+                <div className="flex justify-between mt-2">
+                  <Link onClick={() => { setRange('all'); setTypes(new Set(['call', 'task', 'event', 'email'])) }}>Restore Defaults</Link>
+                  <Btn className="h-7 px-3" onClick={() => setFilterOpen(false)}>Apply</Btn>
+                </div>
+              </div>
+            )}
+          </span>
         </div>
         <div className="flex justify-end gap-1 text-[12px] -mt-1 mb-2">
-          <Link>Refresh</Link> <span className="text-[#747474]">•</span> <Link onClick={() => setExpandAll((x) => !x)}>{expandAll ? 'Collapse All' : 'Expand All'}</Link> <span className="text-[#747474]">•</span> <Link>View All</Link>
+          <Link onClick={() => { setSpin(true); setTimeout(() => setSpin(false), 600) }}>{spin ? 'Refreshing…' : 'Refresh'}</Link> <span className="text-[#747474]">•</span> <Link onClick={() => setExpandAll((x) => !x)}>{expandAll ? 'Collapse All' : 'Expand All'}</Link> <span className="text-[#747474]">•</span> <Link onClick={() => setAllOpen(true)}>View All</Link>
         </div>
         <Section title="Upcoming & Overdue" items={upcoming} expanded={expanded} setExpanded={setExpanded} expandAll={expandAll} />
         {!upcoming.length && <div className="text-[13px] text-[#444] text-center py-3 bg-[#F3F3F3] rounded mb-2">No activities to show. Get started by sending an email, scheduling a task, and more.</div>}
@@ -243,6 +313,29 @@ export function ActivityPanel({
         ))}
         <div className="text-center text-[12px] text-[#444] pt-3">No more past activities to load.</div>
       </div>
+      {allOpen && (
+        <Modal title={`Activity History — ${whatName}`} width={820} onClose={() => setAllOpen(false)} footer={<Btn variant="brand" onClick={() => setAllOpen(false)}>Close</Btn>}>
+          <table className="w-full text-[12.5px]">
+            <thead>
+              <tr className="bg-[#F3F3F3] h-8 text-left text-[#444]">
+                {['Subject', 'Type', 'Name', 'Date', 'Status', 'Assigned To'].map((h) => <th key={h} className="font-normal px-3">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((i) => (
+                <tr key={i.id} className="h-8 border-b border-[#E5E5E5]">
+                  <td className="px-3 truncate max-w-[260px]">{i.subject}</td>
+                  <td className="px-3 capitalize">{i.kind}</td>
+                  <td className="px-3">{contacts.find((c) => c.id === i.whoId)?.name ?? ''}</td>
+                  <td className="px-3">{sfDate(i.kind === 'task' ? i.dueDate : i.when)}</td>
+                  <td className="px-3">{i.kind === 'task' ? i.status : 'Completed'}</td>
+                  <td className="px-3">{person(i.ownerId).name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -270,6 +363,21 @@ function Section({ title, right, items, expanded, setExpanded, expandAll }: { ti
 function TimelineItem({ item, open, toggle, last }: { item: any; open: boolean; toggle: () => void; last: boolean }) {
   const contacts = useCollection<any>('salesforce.contacts')
   const { go } = useNav()
+  const { run, toast } = useActions()
+  const isTask = item.kind === 'task'
+  const toggleDone = () => db.update('salesforce.tasks', item.id, { status: item.status === 'Completed' ? 'Not Started' : 'Completed' })
+  const menu: MenuItem[] = isTask
+    ? [
+        { label: item.status === 'Completed' ? 'Mark Incomplete' : 'Mark Complete', onClick: toggleDone },
+        { label: 'Edit', onClick: () => run({ kind: 'edit', object: 'Task', id: item.id }) },
+        { label: 'Change Date', onClick: () => run({ kind: 'edit', object: 'Task', id: item.id }) },
+        { label: 'Delete', onClick: () => run({ kind: 'delete', object: 'Task', id: item.id, name: item.subject }) },
+      ]
+    : [
+        { label: 'Edit', onClick: () => run({ kind: 'edit', object: item.kind === 'event' ? 'Event' : 'Call', id: item.id }), disabled: item.kind === 'email' },
+        { label: 'Create Follow-Up Task', onClick: () => run({ kind: 'new', object: 'Task', defaults: { subject: `Follow up: ${item.subject.replace(/^Email: /, '')}`, whatId: item.whatId, whoId: item.whoId }, stay: true }) },
+        { label: 'Delete', onClick: () => { db.remove('salesforce.activities', item.id); toast(`"${item.subject}" was deleted.`) } },
+      ]
   const m = TYPE_META[item.kind] ?? TYPE_META.task
   const who = contacts.find((c) => c.id === item.whoId)
   const dt = new Date(item.when)
@@ -288,14 +396,14 @@ function TimelineItem({ item, open, toggle, last }: { item: any; open: boolean; 
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start gap-2">
-          {item.kind === 'task' && <input type="checkbox" readOnly checked={item.status === 'Completed'} className="mt-1 accent-[#0176D3]" />}
-          <Link className={`text-[13px] font-normal truncate ${item.kind === 'task' && item.status === 'Completed' ? 'line-through' : ''}`}>{item.subject}</Link>
+          {item.kind === 'task' && <input type="checkbox" aria-label={`Mark ${item.subject} complete`} checked={item.status === 'Completed'} onChange={toggleDone} className="mt-1 accent-[#0176D3]" />}
+          <Link className={`text-[13px] font-normal truncate ${item.kind === 'task' && item.status === 'Completed' ? 'line-through' : ''}`} onClick={toggle}>{item.subject}</Link>
           {item.createdBy === 'hworker' && <HWChip />}
           <div className="flex-1" />
           <span className={`text-[12px] whitespace-nowrap ${overdue ? 'text-[#BA0517]' : 'text-[#444]'}`}>{dateLabel}</span>
-          <button className="w-5 h-5 border border-[#C9C9C9] rounded flex items-center justify-center text-[#747474]">
+          <MenuButton label={`Actions for ${item.subject}`} className="w-5 h-5 border border-[#C9C9C9] rounded flex items-center justify-center text-[#747474] hover:bg-[#F3F3F3]" menuClass="right-0 top-6" width={190} items={menu}>
             <ChevronDown size={11} />
-          </button>
+          </MenuButton>
         </div>
         <div className="text-[12px] text-[#444]">
           {owner} {m.verb}

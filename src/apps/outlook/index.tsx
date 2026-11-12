@@ -7,8 +7,11 @@ import {
   People24Regular,
   People24Filled,
   PeopleTeam24Regular,
+  PeopleTeam24Filled,
   Attach24Regular,
+  Attach24Filled,
   CheckmarkCircle24Regular,
+  CheckmarkCircle24Filled,
   Apps24Regular,
   Search20Regular,
   Alert20Regular,
@@ -16,68 +19,64 @@ import {
   Lightbulb20Regular,
   Video20Regular,
   Grid20Regular,
-  Mail20Regular,
-  Call20Regular,
-  Chat20Regular,
+  Dismiss20Regular,
+  Person20Regular,
+  MailUnread20Regular,
 } from '@fluentui/react-icons'
 import type { AppProps } from '@/os/registry'
 import { logoUrl } from '@/os/registry'
 import { WindowControls } from '@/os/Window'
+import { useDesk } from '@/os/context'
 import { Avatar } from '@/components/Avatar'
-import { ME, PEOPLE } from '@/data/people'
+import { ME } from '@/data/people'
 import { MailView } from './Mail'
 import { CalendarView } from './Calendar'
+import { FilesView, GroupsView, NotificationsPanel, PeopleView, SettingsFlyout, TIPS, TodoView } from './Panels'
+import { MenuItem, MenuPanel, MenuSep, useMenu, usePrefs } from './ui'
 
-type View = 'mail' | 'calendar' | 'people'
+type View = 'mail' | 'calendar' | 'people' | 'groups' | 'files' | 'todo'
 
-function PeopleView() {
-  const [sel, setSel] = useState(PEOPLE[1].id)
-  const p = PEOPLE.find((x) => x.id === sel)!
+const LAUNCH: [string, string, string][] = [
+  ['outlook', 'Outlook', 'outlook'],
+  ['teams', 'Teams', 'teams'],
+  ['word', 'Word', 'word'],
+  ['excel', 'Excel', 'excel'],
+  ['powerpoint', 'PowerPoint', 'powerpoint'],
+  ['onedrive', 'OneDrive', 'explorer'],
+  ['powerbi', 'Power BI', 'powerbi'],
+  ['edge', 'Edge', 'edge'],
+]
+
+function Launcher({ onPick }: { onPick: (appId: string) => void }) {
   return (
-    <div className="flex-1 min-h-0 flex">
-      <div className="w-[320px] shrink-0 m-2 bg-white rounded-lg shadow-[0_0_2px_rgba(0,0,0,0.12),0_2px_4px_rgba(0,0,0,0.14)] overflow-auto">
-        <div className="px-4 h-11 flex items-center text-[14px] font-semibold border-b border-[#F0F0F0]">Contacts · {PEOPLE.length}</div>
-        {PEOPLE.map((x) => (
-          <button key={x.id} onClick={() => setSel(x.id)} className={`w-full flex items-center gap-3 px-4 py-2 text-left ${sel === x.id ? 'bg-[#EBF3FC]' : 'hover:bg-[#F5F5F5]'}`}>
-            <Avatar id={x.id} size={32} />
-            <div className="min-w-0">
-              <div className="text-[13.5px] truncate">{x.name}</div>
-              <div className="text-[12px] text-[#616161] truncate">{x.title} · {x.company}</div>
-            </div>
+    <MenuPanel className="left-1 top-12 w-[300px] p-3">
+      <div className="text-[13px] font-semibold mb-2 px-1">Apps</div>
+      <div className="grid grid-cols-4 gap-1">
+        {LAUNCH.map(([logo, name, app]) => (
+          <button key={name} data-agent={`outlook-launch-${logo}`} onClick={() => onPick(app)} className="flex flex-col items-center gap-1 py-2 rounded hover:bg-[#F5F5F5]">
+            <img src={logoUrl(logo)} className="w-7 h-7" alt="" />
+            <span className="text-[11.5px] text-[#424242]">{name}</span>
           </button>
         ))}
       </div>
-      <div className="flex-1 m-2 ml-0 bg-white rounded-lg shadow-[0_0_2px_rgba(0,0,0,0.12),0_2px_4px_rgba(0,0,0,0.14)] p-8">
-        <div className="flex items-center gap-5">
-          <Avatar id={p.id} size={88} />
-          <div>
-            <div className="text-[24px] font-semibold">{p.name}</div>
-            <div className="text-[14px] text-[#616161]">{p.title} · {p.dept}</div>
-            <div className="text-[14px] text-[#616161]">{p.company}</div>
-            <div className="flex gap-2 mt-3">
-              {[Mail20Regular, Chat20Regular, Call20Regular, Video20Regular].map((I, i) => (
-                <button key={i} className="w-9 h-9 rounded-full bg-[#EBF3FC] text-[#0F6CBD] flex items-center justify-center hover:bg-[#CFE4FA]"><I /></button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="mt-8 grid grid-cols-2 gap-6 max-w-[640px] text-[13.5px]">
-          {[['Email', p.email], ['Work phone', p.phone], ['Office location', p.location], ['Department', p.dept]].map(([k, v]) => (
-            <div key={k}>
-              <div className="text-[12px] text-[#616161]">{k}</div>
-              <div className={k === 'Email' ? 'text-[#0F6CBD]' : ''}>{v}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+    </MenuPanel>
   )
 }
 
 export default function Outlook({ win, params }: AppProps) {
+  const { open } = useDesk()
+  const [prefs] = usePrefs()
   const [view, setView] = useState<View>('mail')
   const [search, setSearch] = useState('')
   const [searchText, setSearchText] = useState('')
+  const [settings, setSettings] = useState(false)
+  const [peopleInit, setPeopleInit] = useState<{ id?: string; n: number }>({ n: 0 })
+  const [groupInit, setGroupInit] = useState<string | undefined>()
+  const launcher = useMenu()
+  const railLauncher = useMenu()
+  const bell = useMenu()
+  const tips = useMenu()
+  const account = useMenu()
 
   useEffect(() => {
     if (params?.view) setView(params.view)
@@ -85,20 +84,37 @@ export default function Outlook({ win, params }: AppProps) {
     else if (params?.emailId || params?.folder || params?.compose) setView('mail')
   }, [win.nonce])
 
-  const rail: [View | string, any, any, string][] = [
+  const rail: [View, any, any, string][] = [
     ['mail', Mail24Regular, Mail24Filled, 'Mail'],
     ['calendar', Calendar24Regular, Calendar24Filled, 'Calendar'],
     ['people', People24Regular, People24Filled, 'People'],
-    ['groups', PeopleTeam24Regular, PeopleTeam24Regular, 'Groups'],
-    ['files', Attach24Regular, Attach24Regular, 'Files'],
-    ['todo', CheckmarkCircle24Regular, CheckmarkCircle24Regular, 'To Do'],
+    ['groups', PeopleTeam24Regular, PeopleTeam24Filled, 'Groups'],
+    ['files', Attach24Regular, Attach24Filled, 'Files'],
+    ['todo', CheckmarkCircle24Regular, CheckmarkCircle24Filled, 'To Do'],
   ]
 
+  const onNav = (v: string, extra?: any) => {
+    if (v === 'settings') return setSettings(true)
+    if (v === 'tips') return tips.setOpen(true)
+    if (v === 'calendar') return open('outlook', { view: 'calendar', ...(extra ?? {}) })
+    if (v === 'groups') setGroupInit(extra?.groupId)
+    setView(v as View)
+  }
+  const launch = (app: string) => {
+    if (app === 'outlook') setView('mail')
+    else open(app)
+    launcher.close()
+    railLauncher.close()
+  }
+
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-[#F0F0F0]" style={{ fontFamily: 'var(--font-win)' }}>
+    <div className="relative flex-1 min-h-0 flex flex-col bg-[#F0F0F0]" style={{ fontFamily: 'var(--font-win)' }}>
       {/* header */}
       <div data-drag-handle className="h-12 shrink-0 flex items-center bg-[#0F6CBD] text-white">
-        <button className="w-12 h-12 flex items-center justify-center hover:bg-white/10" aria-label="App launcher"><Grid20Regular /></button>
+        <div className="relative" ref={launcher.ref} data-no-drag>
+          <button className="w-12 h-12 flex items-center justify-center hover:bg-white/10" aria-label="App launcher" onClick={launcher.toggle}><Grid20Regular /></button>
+          {launcher.open && <Launcher onPick={launch} />}
+        </div>
         <div className="flex items-center gap-2 w-[200px]">
           <span className="text-[16px] font-semibold">Outlook</span>
         </div>
@@ -118,18 +134,68 @@ export default function Outlook({ win, params }: AppProps) {
                   setSearch(searchText)
                   setView('mail')
                 }
+                if (e.key === 'Escape') {
+                  setSearchText('')
+                  setSearch('')
+                }
               }}
               placeholder="Search"
               className="flex-1 outline-none text-[13.5px] bg-transparent"
             />
+            {searchText && (
+              <button
+                aria-label="Clear search"
+                className="w-6 h-6 rounded hover:bg-[#F0F0F0] flex items-center justify-center text-[#616161]"
+                onClick={() => {
+                  setSearchText('')
+                  setSearch('')
+                }}
+              >
+                <Dismiss20Regular className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
         <div className="flex items-center" data-no-drag>
-          <button className="flex items-center gap-1.5 h-8 px-2.5 mr-1 rounded hover:bg-white/10 text-[13px]"><Video20Regular /> Meet Now</button>
-          <button className="w-10 h-12 flex items-center justify-center hover:bg-white/10"><Alert20Regular /></button>
-          <button className="w-10 h-12 flex items-center justify-center hover:bg-white/10"><Settings20Regular /></button>
-          <button className="w-10 h-12 flex items-center justify-center hover:bg-white/10"><Lightbulb20Regular /></button>
-          <button className="w-12 h-12 flex items-center justify-center hover:bg-white/10"><Avatar id={ME.id} size={30} ring="rgba(255,255,255,0.6)" /></button>
+          <button data-agent="outlook-meet-now" className="flex items-center gap-1.5 h-8 px-2.5 mr-1 rounded hover:bg-white/10 text-[13px]" onClick={() => open('teams', { meetNow: true })}><Video20Regular /> Meet Now</button>
+          <div className="relative" ref={bell.ref}>
+            <button data-agent="outlook-notifications-button" className="w-10 h-12 flex items-center justify-center hover:bg-white/10" aria-label="Notifications" title="Notifications" onClick={bell.toggle}><Alert20Regular /></button>
+            {bell.open && <NotificationsPanel onClose={bell.close} />}
+          </div>
+          <button data-agent="outlook-settings-button" className={`w-10 h-12 flex items-center justify-center hover:bg-white/10 ${settings ? 'bg-white/15' : ''}`} aria-label="Settings" title="Settings" onClick={() => setSettings((s) => !s)}><Settings20Regular /></button>
+          <div className="relative" ref={tips.ref}>
+            <button className="w-10 h-12 flex items-center justify-center hover:bg-white/10" aria-label="Tips" title="Tips" onClick={tips.toggle}><Lightbulb20Regular /></button>
+            {tips.open && (
+              <MenuPanel className="right-0 top-12 w-[320px] p-1">
+                <div className="px-3 pt-2 pb-1 text-[14px] font-semibold">Tips for Outlook</div>
+                {TIPS.map(([t, d]) => (
+                  <div key={t} className="px-3 py-2 rounded hover:bg-[#F5F5F5]">
+                    <div className="text-[13px] font-semibold">{t}</div>
+                    <div className="text-[12.5px] text-[#616161]">{d}</div>
+                  </div>
+                ))}
+              </MenuPanel>
+            )}
+          </div>
+          <div className="relative" ref={account.ref}>
+            <button className="w-12 h-12 flex items-center justify-center hover:bg-white/10" aria-label="Account manager" onClick={account.toggle}><Avatar id={ME.id} size={30} ring="rgba(255,255,255,0.6)" /></button>
+            {account.open && (
+              <MenuPanel className="right-0 top-12 w-[280px]">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <Avatar id={ME.id} size={48} />
+                  <div className="min-w-0">
+                    <div className="text-[14px] font-semibold truncate">{ME.name}</div>
+                    <div className="text-[12.5px] text-[#616161] truncate">{ME.email}</div>
+                    {prefs.autoReply && <div className="text-[11.5px] text-[#8A5A00]">Automatic replies on</div>}
+                  </div>
+                </div>
+                <MenuSep />
+                <MenuItem icon={<Person20Regular />} label="My profile" onClick={() => { setPeopleInit((p) => ({ id: ME.id, n: p.n + 1 })); setView('people'); account.close() }} />
+                <MenuItem icon={<MailUnread20Regular />} label="Automatic replies" onClick={() => { setSettings(true); account.close() }} />
+                <MenuItem icon={<Settings20Regular />} label="Settings" onClick={() => { setSettings(true); account.close() }} />
+              </MenuPanel>
+            )}
+          </div>
         </div>
         <WindowControls dark height={48} />
       </div>
@@ -144,7 +210,7 @@ export default function Outlook({ win, params }: AppProps) {
                 data-agent={`outlook-nav-${id}`}
                 aria-label={label}
                 title={label}
-                onClick={() => (id === 'mail' || id === 'calendar' || id === 'people') && setView(id as View)}
+                onClick={() => setView(id)}
                 className={`relative w-11 h-12 rounded-md flex flex-col items-center justify-center gap-0.5 ${active ? 'text-[#0F6CBD]' : 'text-[#424242] hover:bg-[#E5E5E5]'}`}
               >
                 {active && <span className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full bg-[#0F6CBD]" />}
@@ -154,16 +220,27 @@ export default function Outlook({ win, params }: AppProps) {
           })}
           <div className="w-6 h-px bg-[#D1D1D1] my-1" />
           {['word', 'excel', 'powerpoint', 'onedrive'].map((a) => (
-            <button key={a} className="w-11 h-10 rounded-md flex items-center justify-center hover:bg-[#E5E5E5]">
+            <button key={a} title={a === 'onedrive' ? 'OneDrive' : a[0].toUpperCase() + a.slice(1)} onClick={() => open(a === 'onedrive' ? 'explorer' : a)} className="w-11 h-10 rounded-md flex items-center justify-center hover:bg-[#E5E5E5]">
               <img src={logoUrl(a)} className="w-5 h-5" alt="" />
             </button>
           ))}
-          <button className="w-11 h-10 rounded-md flex items-center justify-center hover:bg-[#E5E5E5] text-[#424242]"><Apps24Regular /></button>
+          <div className="relative" ref={railLauncher.ref}>
+            <button title="More apps" aria-label="More apps" onClick={railLauncher.toggle} className="w-11 h-10 rounded-md flex items-center justify-center hover:bg-[#E5E5E5] text-[#424242]"><Apps24Regular /></button>
+            {railLauncher.open && (
+              <div className="absolute left-12 -top-40">
+                <Launcher onPick={launch} />
+              </div>
+            )}
+          </div>
         </div>
-        {view === 'mail' && <MailView params={params} nonce={win.nonce} search={search} />}
+        {view === 'mail' && <MailView params={params} nonce={win.nonce} search={search} onNav={onNav} />}
         {view === 'calendar' && <CalendarView params={params} nonce={win.nonce} />}
-        {view === 'people' && <PeopleView />}
+        {view === 'people' && <PeopleView key={peopleInit.n} initial={peopleInit.id} />}
+        {view === 'groups' && <GroupsView key={groupInit ?? 'g'} initial={groupInit} />}
+        {view === 'files' && <FilesView />}
+        {view === 'todo' && <TodoView />}
       </div>
+      {settings && <SettingsFlyout onClose={() => setSettings(false)} />}
     </div>
   )
 }

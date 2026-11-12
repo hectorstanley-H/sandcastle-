@@ -24,11 +24,51 @@ export function ActionBar({ col, id, name, email, contactId, dealId }: { col: Co
           <span className="text-[11.5px]">{l}</span>
         </div>
       ))}
-      <div className="flex flex-col items-center gap-1">
-        <button className="w-9 h-9 rounded-full border border-[#CBD6E2] bg-[#F5F8FA] flex items-center justify-center text-[#33475B]"><MoreHorizontal size={16} /></button>
-        <span className="text-[11.5px]">More</span>
-      </div>
+      <MoreActions col={col} id={id} name={name} />
     </div>
+  )
+}
+
+const MORE_CHANNELS = ['LinkedIn message', 'SMS', 'WhatsApp message', 'Postal mail']
+
+function MoreActions({ col, id, name }: { col: Col; id: string; name: string }) {
+  const { open, toast } = useHNav()
+  const [o, setO] = useState(false)
+  const pick = (ch: string) => {
+    setO(false)
+    open(<LogChannel channel={ch} col={col} id={id} name={name} onClose={() => open(null)} onDone={() => toast(`${ch} logged.`)} />)
+  }
+  return (
+    <div className="flex flex-col items-center gap-1 relative">
+      <button data-agent="hs-action-more" aria-label="More" onClick={() => setO(!o)} className="w-9 h-9 rounded-full border border-[#CBD6E2] bg-[#F5F8FA] flex items-center justify-center text-[#33475B] hover:bg-[#EAF0F6]"><MoreHorizontal size={16} /></button>
+      <span className="text-[11.5px]">More</span>
+      {o && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setO(false)} />
+          <div className="absolute left-0 top-11 z-40 w-[200px] bg-white border border-[#CBD6E2] rounded shadow-lg py-1 text-left">
+            {MORE_CHANNELS.map((ch) => <button key={ch} data-agent={`hs-action-more-${ch.split(' ')[0].toLowerCase()}`} onClick={() => pick(ch)} className="w-full text-left px-3 h-9 text-[13.5px] hover:bg-[#F5F8FA]">Log {ch}</button>)}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function LogChannel({ channel, col, id, name, onClose, onDone }: { channel: string; col: Col; id: string; name: string; onClose: () => void; onDone: () => void }) {
+  const { isAgent } = useDesk()
+  const [body, setBody] = useState('')
+  const [dir, setDir] = useState('Outbound')
+  const save = () => {
+    logActivity(col, id, { type: 'note', title: `${dir} ${channel} logged`, body, by: isAgent ? 'hworker' : undefined })
+    onDone()
+    onClose()
+  }
+  return (
+    <Modal title={`Log ${channel}`} onClose={onClose} width={520} agent="hs-log-channel-modal" footer={<><HBtn variant="primary" small agent="hs-log-channel-save" disabled={!body.trim()} onClick={save}>Log activity</HBtn><HBtn small onClick={onClose}>Cancel</HBtn></>}>
+      <div className="text-[13px] text-[#516F90]">Associated with <b className="text-[#33475B]">{name}</b></div>
+      <Field label="Direction"><select value={dir} onChange={(e) => setDir(e.target.value)} className={`${inputH} w-full`}><option>Outbound</option><option>Inbound</option></select></Field>
+      <Field label="Description"><textarea data-agent="hs-log-channel-body" rows={4} value={body} onChange={(e) => setBody(e.target.value)} className={`${inputH} h-auto py-2 w-full`} /></Field>
+    </Modal>
   )
 }
 

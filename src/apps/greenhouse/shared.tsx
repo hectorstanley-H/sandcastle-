@@ -28,6 +28,8 @@ export type Route =
   | { page: 'reports' }
   | { page: 'crm' }
   | { page: 'integrations' }
+  | { page: 'posts' }
+  | { page: 'configure' }
 
 export type Go = (r: Route) => void
 

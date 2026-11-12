@@ -1,6 +1,7 @@
 /**
  * Tiny spreadsheet formula engine: arithmetic, comparison, &, cell refs, ranges, cross-sheet refs,
- * and the functions SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, ROUND, ABS, IF, IFERROR, SUMIF, COUNTIF, AVERAGEIF.
+ * and the functions SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, ROUND, ABS, IF, IFERROR, SUMIF, COUNTIF, AVERAGEIF,
+ * plus an extended library (lookup, text, logical, date, financial, statistical — see FUNCTIONS) and defined names.
  */
 import type { Cell, CellFmt, Sheet } from './seed'
 
@@ -45,6 +46,7 @@ type Tok =
   | { t: 'fn'; v: string }
   | { t: 'op'; v: string }
   | { t: 'bool'; v: boolean }
+  | { t: 'name'; v: string }
 
 function tokenize(src: string): Tok[] {
   const out: Tok[] = []
@@ -99,9 +101,16 @@ function tokenize(src: string): Tok[] {
       i += v ? 4 : 5
       continue
     }
-    if (rng && (rng[2] || /\d/.test(rng[1]))) {
+    const ident = !sheet ? /^[A-Za-z_][A-Za-z0-9_.]*/.exec(rest) : null
+    if (rng && (rng[2] || /\d/.test(rng[1])) && (!ident || rng[0].length >= ident[0].length)) {
       out.push({ t: 'ref', sheet, a: rng[1].replace(/\$/g, '').toUpperCase(), b: rng[2]?.replace(/\$/g, '').toUpperCase() })
       i += consumed + rng[0].length
+      continue
+    }
+    if (ident) {
+      // defined name (Name Manager)
+      out.push({ t: 'name', v: ident[0].toUpperCase() })
+      i += ident[0].length
       continue
     }
     const two = s.slice(i, i + 2)
@@ -125,8 +134,15 @@ export class Evaluator {
   private cache = new Map<string, Val>()
   private stack = new Set<string>()
   private sheets: Sheet[]
-  constructor(sheets: Sheet[]) {
+  private names: Record<string, string>
+  constructor(sheets: Sheet[], names?: { name: string; ref: string }[]) {
     this.sheets = sheets
+    this.names = Object.fromEntries((names ?? []).map((n) => [n.name.toUpperCase(), n.ref]))
+  }
+
+  /** resolve a defined name to the sheet-qualified range it refers to */
+  nameRef(name: string): string | undefined {
+    return this.names[name.toUpperCase()]
   }
 
   private sheetIdx(name?: string, cur = 0) {
@@ -205,6 +221,13 @@ export class Evaluator {
       if (t.t === 'str') return t.v
       if (t.t === 'bool') return t.v
       if (t.t === 'ref') return rangeOf(t)
+      if (t.t === 'name') {
+        const ref = this.names[t.v]
+        if (!ref) throw new Error('#NAME?')
+        const inner = tokenize(ref.replace(/^=/, ''))
+        if (inner.length !== 1 || inner[0].t !== 'ref') throw new Error('#REF!')
+        return rangeOf(inner[0])
+      }
       if (t.t === 'fn') {
         expect('(')
         const args: Any[] = []
@@ -420,13 +443,419 @@ function callFn(name: string, args: Any[]): Val {
     }
     case 'TODAY':
       return Math.floor(Date.now() / 86400000) + 25569
-    default:
-      throw new Error('#NAME?')
+    default: {
+      const v = moreFn(name, args)
+      if (v === undefined) throw new Error('#NAME?')
+      return v
+    }
   }
 }
 
+/* ───────── extended function library ───────── */
+const serialToDate = (n: number) => new Date(Math.round((n - 25569) * 86400000))
+const dateToSerial = (d: Date) => Math.floor(d.getTime() / 86400000) + 25569
+const arr2 = (a: Any): Val[][] => (isArr(a) ? a.range : [[scalar(a)]])
+const truthy = (v: Val) => (typeof v === 'string' ? v.toUpperCase() === 'TRUE' || (v.length > 0 && v.toUpperCase() !== 'FALSE') : !!v)
+const eqVal = (a: Val, b: Val) => compare(a, b, '=')
+
+/** functions beyond the core set; returns undefined for unknown names */
+function moreFn(name: string, args: Any[]): Val | undefined {
+  switch (name) {
+    /* math */
+    case 'PRODUCT':
+      return nums(args).reduce((s, n) => s * n, 1)
+    case 'MEDIAN': {
+      const n = nums(args).sort((a, b) => a - b)
+      if (!n.length) throw new Error('#NUM!')
+      const m = Math.floor(n.length / 2)
+      return n.length % 2 ? n[m] : (n[m - 1] + n[m]) / 2
+    }
+    case 'ROUNDUP':
+    case 'ROUNDDOWN': {
+      const d = args[1] !== undefined ? num(args[1]) : 0
+      const f = Math.pow(10, d)
+      const x = num(args[0]) * f
+      return (name === 'ROUNDUP' ? Math.sign(x) * Math.ceil(Math.abs(x)) : Math.sign(x) * Math.floor(Math.abs(x))) / f
+    }
+    case 'INT':
+      return Math.floor(num(args[0]))
+    case 'MOD': {
+      const d = num(args[1])
+      if (d === 0) throw new Error('#DIV/0!')
+      const n = num(args[0])
+      return n - d * Math.floor(n / d)
+    }
+    case 'POWER':
+      return Math.pow(num(args[0]), num(args[1]))
+    case 'SQRT': {
+      const n = num(args[0])
+      if (n < 0) throw new Error('#NUM!')
+      return Math.sqrt(n)
+    }
+    case 'PI':
+      return Math.PI
+    case 'RAND':
+      return Math.random()
+    case 'RANDBETWEEN': {
+      const lo = Math.ceil(num(args[0]))
+      const hi = Math.floor(num(args[1]))
+      return lo + Math.floor(Math.random() * (hi - lo + 1))
+    }
+    case 'SUMPRODUCT': {
+      const as = args.map((a) => arr2(a).flat())
+      const len = as[0]?.length ?? 0
+      let s = 0
+      for (let i = 0; i < len; i++) s += as.reduce((p, a) => p * (typeof a[i] === 'number' ? (a[i] as number) : 0), 1)
+      return s
+    }
+    case 'COUNTBLANK':
+      return flat(args).filter((v) => v === null || v === '').length
+    case 'LARGE':
+    case 'SMALL': {
+      const n = nums([args[0]]).sort((a, b) => (name === 'LARGE' ? b - a : a - b))
+      const k = num(args[1])
+      if (k < 1 || k > n.length) throw new Error('#NUM!')
+      return n[k - 1]
+    }
+    case 'RANK':
+    case 'RANK.EQ': {
+      const x = num(args[0])
+      const n = nums([args[1]])
+      const asc = args[2] !== undefined && num(args[2]) !== 0
+      return n.filter((v) => (asc ? v < x : v > x)).length + 1
+    }
+    case 'SUMIFS':
+    case 'COUNTIFS':
+    case 'AVERAGEIFS': {
+      const hasSum = name !== 'COUNTIFS'
+      const sumR = hasSum ? arr2(args[0]).flat() : null
+      const pairs: [Val[], (v: Val) => boolean][] = []
+      for (let i = hasSum ? 1 : 0; i + 1 < args.length; i += 2) pairs.push([arr2(args[i]).flat(), criteria(scalar(args[i + 1]))])
+      const len = (sumR ?? pairs[0]?.[0] ?? []).length
+      let s = 0
+      let n = 0
+      for (let i = 0; i < len; i++) {
+        if (!pairs.every(([r, t]) => t(r[i] ?? null))) continue
+        n++
+        const x = sumR?.[i]
+        if (typeof x === 'number') s += x
+      }
+      if (name === 'COUNTIFS') return n
+      if (name === 'AVERAGEIFS') {
+        if (!n) throw new Error('#DIV/0!')
+        return s / n
+      }
+      return s
+    }
+    /* logical */
+    case 'AND':
+      return flat(args).every((v) => truthy(v))
+    case 'OR':
+      return flat(args).some((v) => truthy(v))
+    case 'NOT':
+      return !truthy(scalar(args[0]))
+    case 'XOR':
+      return flat(args).filter((v) => truthy(v)).length % 2 === 1
+    case 'IFS': {
+      for (let i = 0; i + 1 < args.length; i += 2) if (truthy(scalar(args[i]))) return scalar(args[i + 1])
+      throw new Error('#N/A')
+    }
+    case 'IFNA': {
+      const v = scalar(args[0])
+      return isErr(v) && v.err === '#N/A' ? scalar(args[1]) : v
+    }
+    case 'ISBLANK': {
+      const v = scalar(args[0])
+      return v === null || v === ''
+    }
+    case 'ISNUMBER':
+      return typeof scalar(args[0]) === 'number'
+    case 'ISTEXT':
+      return typeof scalar(args[0]) === 'string'
+    case 'ISERROR':
+      return isErr(scalar(args[0]))
+    /* text */
+    case 'CONCAT':
+    case 'CONCATENATE':
+      return flat(args).map((v) => str(v)).join('')
+    case 'TEXTJOIN': {
+      const sep = str(args[0])
+      const skip = truthy(scalar(args[1]))
+      return flat(args.slice(2))
+        .filter((v) => !skip || (v !== null && v !== ''))
+        .map((v) => str(v))
+        .join(sep)
+    }
+    case 'LEFT':
+      return str(args[0]).slice(0, args[1] !== undefined ? num(args[1]) : 1)
+    case 'RIGHT': {
+      const s = str(args[0])
+      const n = args[1] !== undefined ? num(args[1]) : 1
+      return n <= 0 ? '' : s.slice(-n)
+    }
+    case 'MID':
+      return str(args[0]).substr(Math.max(0, num(args[1]) - 1), num(args[2]))
+    case 'LEN':
+      return str(args[0]).length
+    case 'UPPER':
+      return str(args[0]).toUpperCase()
+    case 'LOWER':
+      return str(args[0]).toLowerCase()
+    case 'PROPER':
+      return str(args[0]).toLowerCase().replace(/(^|[^a-z])([a-z])/g, (_m, a, b) => a + b.toUpperCase())
+    case 'TRIM':
+      return str(args[0]).trim().replace(/\s+/g, ' ')
+    case 'SUBSTITUTE':
+      return str(args[0]).split(str(args[1])).join(str(args[2]))
+    case 'REPT':
+      return str(args[0]).repeat(Math.max(0, num(args[1])))
+    case 'FIND':
+    case 'SEARCH': {
+      const hay = name === 'SEARCH' ? str(args[1]).toLowerCase() : str(args[1])
+      const needle = name === 'SEARCH' ? str(args[0]).toLowerCase() : str(args[0])
+      const at = hay.indexOf(needle, args[2] !== undefined ? num(args[2]) - 1 : 0)
+      if (at < 0) throw new Error('#VALUE!')
+      return at + 1
+    }
+    case 'VALUE':
+      return num(args[0])
+    case 'TEXT': {
+      const v = num(args[0])
+      const f = str(args[1])
+      if (/%/.test(f)) return (v * 100).toFixed((f.split('.')[1] ?? '').replace(/[^0]/g, '').length) + '%'
+      if (/[dmy]/i.test(f)) return formatValue(v, 'date')
+      const dec = (f.split('.')[1] ?? '').replace(/[^0#]/g, '').length
+      const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: f.includes(',') })
+      return (v < 0 ? '-' : '') + (f.includes('$') ? '$' : '') + s
+    }
+    /* date & time */
+    case 'NOW':
+      return Date.now() / 86400000 + 25569 - new Date().getTimezoneOffset() / 1440
+    case 'DATE':
+      return dateToSerial(new Date(Date.UTC(num(args[0]), num(args[1]) - 1, num(args[2]))))
+    case 'YEAR':
+      return serialToDate(num(args[0])).getUTCFullYear()
+    case 'MONTH':
+      return serialToDate(num(args[0])).getUTCMonth() + 1
+    case 'DAY':
+      return serialToDate(num(args[0])).getUTCDate()
+    case 'WEEKDAY':
+      return serialToDate(num(args[0])).getUTCDay() + 1
+    case 'EOMONTH': {
+      const d = serialToDate(num(args[0]))
+      return dateToSerial(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + num(args[1]) + 1, 0)))
+    }
+    case 'EDATE': {
+      const d = serialToDate(num(args[0]))
+      return dateToSerial(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + num(args[1]), d.getUTCDate())))
+    }
+    case 'DAYS':
+      return Math.round(num(args[0]) - num(args[1]))
+    case 'NETWORKDAYS': {
+      let a = Math.round(num(args[0]))
+      const b = Math.round(num(args[1]))
+      const step = a <= b ? 1 : -1
+      let n = 0
+      for (; step > 0 ? a <= b : a >= b; a += step) {
+        const wd = serialToDate(a).getUTCDay()
+        if (wd !== 0 && wd !== 6) n++
+      }
+      return n * step
+    }
+    /* lookup & reference */
+    case 'VLOOKUP':
+    case 'HLOOKUP': {
+      const key = scalar(args[0])
+      const tbl = arr2(args[1])
+      const idx = num(args[2]) - 1
+      const exact = args[3] !== undefined && !truthy(scalar(args[3]))
+      const rows = name === 'VLOOKUP' ? tbl : tbl[0]?.map((_, c) => tbl.map((r) => r[c])) ?? []
+      let hit = -1
+      if (exact) hit = rows.findIndex((r) => eqVal(r[0], key))
+      else
+        rows.forEach((r, i) => {
+          if (r[0] !== null && compare(r[0], key, '<=')) hit = i
+        })
+      if (hit < 0 || idx < 0) throw new Error('#N/A')
+      if (idx >= (rows[hit]?.length ?? 0)) throw new Error('#REF!')
+      return rows[hit][idx]
+    }
+    case 'XLOOKUP': {
+      const key = scalar(args[0])
+      const look = arr2(args[1]).flat()
+      const ret = arr2(args[2]).flat()
+      const i = look.findIndex((v) => eqVal(v, key))
+      if (i < 0) {
+        if (args[3] !== undefined) return scalar(args[3])
+        throw new Error('#N/A')
+      }
+      return ret[i] ?? null
+    }
+    case 'MATCH': {
+      const key = scalar(args[0])
+      const look = arr2(args[1]).flat()
+      const mode = args[2] !== undefined ? num(args[2]) : 1
+      if (mode === 0) {
+        const i = look.findIndex((v) => eqVal(v, key))
+        if (i < 0) throw new Error('#N/A')
+        return i + 1
+      }
+      let hit = -1
+      look.forEach((v, i) => {
+        if (v !== null && compare(v, key, mode > 0 ? '<=' : '>=')) hit = i
+      })
+      if (hit < 0) throw new Error('#N/A')
+      return hit + 1
+    }
+    case 'INDEX': {
+      const tbl = arr2(args[0])
+      let r = args[1] !== undefined ? num(args[1]) : 1
+      let c = args[2] !== undefined ? num(args[2]) : 1
+      if (tbl.length === 1 && args[2] === undefined) {
+        c = r
+        r = 1
+      }
+      const v = tbl[r - 1]?.[c - 1]
+      if (v === undefined) throw new Error('#REF!')
+      return v
+    }
+    case 'CHOOSE': {
+      const i = num(args[0])
+      if (i < 1 || i >= args.length) throw new Error('#VALUE!')
+      return scalar(args[i])
+    }
+    case 'ROWS':
+      return arr2(args[0]).length
+    case 'COLUMNS':
+      return arr2(args[0])[0]?.length ?? 0
+    /* financial */
+    case 'PMT':
+    case 'PV':
+    case 'FV': {
+      const rate = num(args[0])
+      const nper = num(args[1])
+      const third = num(args[2])
+      const fourth = args[3] !== undefined ? num(args[3]) : 0
+      const type = args[4] !== undefined ? num(args[4]) : 0
+      if (name === 'PMT') {
+        const pv = third
+        const fv = fourth
+        if (rate === 0) return -(pv + fv) / nper
+        const f = Math.pow(1 + rate, nper)
+        return (-(pv * f + fv) * rate) / ((1 + rate * type) * (f - 1))
+      }
+      if (name === 'FV') {
+        const pmt = third
+        const pv = fourth
+        if (rate === 0) return -(pv + pmt * nper)
+        const f = Math.pow(1 + rate, nper)
+        return -(pv * f + (pmt * (1 + rate * type) * (f - 1)) / rate)
+      }
+      const pmt = third
+      const fv = fourth
+      if (rate === 0) return -(fv + pmt * nper)
+      const f = Math.pow(1 + rate, nper)
+      return -(fv + (pmt * (1 + rate * type) * (f - 1)) / rate) / f
+    }
+    case 'NPV': {
+      const rate = num(args[0])
+      return nums(args.slice(1)).reduce((s, v, i) => s + v / Math.pow(1 + rate, i + 1), 0)
+    }
+    case 'STDEV':
+    case 'STDEV.S':
+    case 'VAR':
+    case 'VAR.S': {
+      const n = nums(args)
+      if (n.length < 2) throw new Error('#DIV/0!')
+      const m = n.reduce((s, x) => s + x, 0) / n.length
+      const v = n.reduce((s, x) => s + (x - m) ** 2, 0) / (n.length - 1)
+      return name.startsWith('VAR') ? v : Math.sqrt(v)
+    }
+    default:
+      return undefined
+  }
+}
+
+/** Function catalogue used by Insert Function and the Formulas ribbon. */
+export const FUNCTIONS: { name: string; cat: 'Financial' | 'Logical' | 'Text' | 'Date & Time' | 'Lookup & Reference' | 'Math & Trig' | 'Statistical'; syntax: string; desc: string }[] = [
+  { name: 'SUM', cat: 'Math & Trig', syntax: 'SUM(number1, [number2], ...)', desc: 'Adds all the numbers in a range of cells.' },
+  { name: 'SUMIF', cat: 'Math & Trig', syntax: 'SUMIF(range, criteria, [sum_range])', desc: 'Adds the cells specified by a given condition or criteria.' },
+  { name: 'SUMIFS', cat: 'Math & Trig', syntax: 'SUMIFS(sum_range, criteria_range1, criteria1, ...)', desc: 'Adds the cells specified by a given set of conditions or criteria.' },
+  { name: 'SUMPRODUCT', cat: 'Math & Trig', syntax: 'SUMPRODUCT(array1, [array2], ...)', desc: 'Returns the sum of the products of corresponding ranges or arrays.' },
+  { name: 'ROUND', cat: 'Math & Trig', syntax: 'ROUND(number, num_digits)', desc: 'Rounds a number to a specified number of digits.' },
+  { name: 'ROUNDUP', cat: 'Math & Trig', syntax: 'ROUNDUP(number, num_digits)', desc: 'Rounds a number up, away from zero.' },
+  { name: 'ROUNDDOWN', cat: 'Math & Trig', syntax: 'ROUNDDOWN(number, num_digits)', desc: 'Rounds a number down, toward zero.' },
+  { name: 'ABS', cat: 'Math & Trig', syntax: 'ABS(number)', desc: 'Returns the absolute value of a number.' },
+  { name: 'INT', cat: 'Math & Trig', syntax: 'INT(number)', desc: 'Rounds a number down to the nearest integer.' },
+  { name: 'MOD', cat: 'Math & Trig', syntax: 'MOD(number, divisor)', desc: 'Returns the remainder after a number is divided by a divisor.' },
+  { name: 'POWER', cat: 'Math & Trig', syntax: 'POWER(number, power)', desc: 'Returns the result of a number raised to a power.' },
+  { name: 'SQRT', cat: 'Math & Trig', syntax: 'SQRT(number)', desc: 'Returns a positive square root.' },
+  { name: 'PRODUCT', cat: 'Math & Trig', syntax: 'PRODUCT(number1, [number2], ...)', desc: 'Multiplies all the numbers given as arguments.' },
+  { name: 'RANDBETWEEN', cat: 'Math & Trig', syntax: 'RANDBETWEEN(bottom, top)', desc: 'Returns a random number between the numbers you specify.' },
+  { name: 'AVERAGE', cat: 'Statistical', syntax: 'AVERAGE(number1, [number2], ...)', desc: 'Returns the average (arithmetic mean) of its arguments.' },
+  { name: 'AVERAGEIF', cat: 'Statistical', syntax: 'AVERAGEIF(range, criteria, [average_range])', desc: 'Finds the average for the cells specified by a given condition.' },
+  { name: 'AVERAGEIFS', cat: 'Statistical', syntax: 'AVERAGEIFS(average_range, criteria_range1, criteria1, ...)', desc: 'Finds the average for the cells specified by a set of conditions.' },
+  { name: 'COUNT', cat: 'Statistical', syntax: 'COUNT(value1, [value2], ...)', desc: 'Counts the number of cells in a range that contain numbers.' },
+  { name: 'COUNTA', cat: 'Statistical', syntax: 'COUNTA(value1, [value2], ...)', desc: 'Counts the number of cells in a range that are not empty.' },
+  { name: 'COUNTBLANK', cat: 'Statistical', syntax: 'COUNTBLANK(range)', desc: 'Counts the number of empty cells in a range.' },
+  { name: 'COUNTIF', cat: 'Statistical', syntax: 'COUNTIF(range, criteria)', desc: 'Counts the number of cells within a range that meet the given condition.' },
+  { name: 'COUNTIFS', cat: 'Statistical', syntax: 'COUNTIFS(criteria_range1, criteria1, ...)', desc: 'Counts the number of cells specified by a given set of conditions.' },
+  { name: 'MAX', cat: 'Statistical', syntax: 'MAX(number1, [number2], ...)', desc: 'Returns the largest value in a set of values.' },
+  { name: 'MIN', cat: 'Statistical', syntax: 'MIN(number1, [number2], ...)', desc: 'Returns the smallest number in a set of values.' },
+  { name: 'MEDIAN', cat: 'Statistical', syntax: 'MEDIAN(number1, [number2], ...)', desc: 'Returns the median of the given numbers.' },
+  { name: 'LARGE', cat: 'Statistical', syntax: 'LARGE(array, k)', desc: 'Returns the k-th largest value in a data set.' },
+  { name: 'SMALL', cat: 'Statistical', syntax: 'SMALL(array, k)', desc: 'Returns the k-th smallest value in a data set.' },
+  { name: 'RANK.EQ', cat: 'Statistical', syntax: 'RANK.EQ(number, ref, [order])', desc: 'Returns the rank of a number in a list of numbers.' },
+  { name: 'STDEV.S', cat: 'Statistical', syntax: 'STDEV.S(number1, [number2], ...)', desc: 'Estimates standard deviation based on a sample.' },
+  { name: 'IF', cat: 'Logical', syntax: 'IF(logical_test, [value_if_true], [value_if_false])', desc: 'Checks whether a condition is met, and returns one value if TRUE and another if FALSE.' },
+  { name: 'IFS', cat: 'Logical', syntax: 'IFS(logical_test1, value_if_true1, ...)', desc: 'Checks whether one or more conditions are met and returns a value for the first TRUE condition.' },
+  { name: 'IFERROR', cat: 'Logical', syntax: 'IFERROR(value, value_if_error)', desc: 'Returns value_if_error if the expression is an error, otherwise the value of the expression.' },
+  { name: 'IFNA', cat: 'Logical', syntax: 'IFNA(value, value_if_na)', desc: 'Returns the value you specify if the expression resolves to #N/A.' },
+  { name: 'AND', cat: 'Logical', syntax: 'AND(logical1, [logical2], ...)', desc: 'Checks whether all arguments are TRUE.' },
+  { name: 'OR', cat: 'Logical', syntax: 'OR(logical1, [logical2], ...)', desc: 'Checks whether any of the arguments are TRUE.' },
+  { name: 'NOT', cat: 'Logical', syntax: 'NOT(logical)', desc: 'Changes FALSE to TRUE, or TRUE to FALSE.' },
+  { name: 'XOR', cat: 'Logical', syntax: 'XOR(logical1, [logical2], ...)', desc: 'Returns a logical Exclusive Or of all arguments.' },
+  { name: 'CONCAT', cat: 'Text', syntax: 'CONCAT(text1, [text2], ...)', desc: 'Concatenates a list or range of text strings.' },
+  { name: 'TEXTJOIN', cat: 'Text', syntax: 'TEXTJOIN(delimiter, ignore_empty, text1, ...)', desc: 'Concatenates text with a delimiter.' },
+  { name: 'LEFT', cat: 'Text', syntax: 'LEFT(text, [num_chars])', desc: 'Returns the specified number of characters from the start of a text string.' },
+  { name: 'RIGHT', cat: 'Text', syntax: 'RIGHT(text, [num_chars])', desc: 'Returns the specified number of characters from the end of a text string.' },
+  { name: 'MID', cat: 'Text', syntax: 'MID(text, start_num, num_chars)', desc: 'Returns the characters from the middle of a text string.' },
+  { name: 'LEN', cat: 'Text', syntax: 'LEN(text)', desc: 'Returns the number of characters in a text string.' },
+  { name: 'UPPER', cat: 'Text', syntax: 'UPPER(text)', desc: 'Converts text to uppercase.' },
+  { name: 'LOWER', cat: 'Text', syntax: 'LOWER(text)', desc: 'Converts text to lowercase.' },
+  { name: 'PROPER', cat: 'Text', syntax: 'PROPER(text)', desc: 'Capitalizes the first letter in each word of a text value.' },
+  { name: 'TRIM', cat: 'Text', syntax: 'TRIM(text)', desc: 'Removes extra spaces from text.' },
+  { name: 'SUBSTITUTE', cat: 'Text', syntax: 'SUBSTITUTE(text, old_text, new_text)', desc: 'Substitutes new text for old text in a text string.' },
+  { name: 'FIND', cat: 'Text', syntax: 'FIND(find_text, within_text, [start_num])', desc: 'Finds one text value within another (case-sensitive).' },
+  { name: 'SEARCH', cat: 'Text', syntax: 'SEARCH(find_text, within_text, [start_num])', desc: 'Finds one text value within another (not case-sensitive).' },
+  { name: 'TEXT', cat: 'Text', syntax: 'TEXT(value, format_text)', desc: 'Formats a number and converts it to text.' },
+  { name: 'VALUE', cat: 'Text', syntax: 'VALUE(text)', desc: 'Converts a text argument to a number.' },
+  { name: 'TODAY', cat: 'Date & Time', syntax: 'TODAY()', desc: 'Returns the current date formatted as a date.' },
+  { name: 'NOW', cat: 'Date & Time', syntax: 'NOW()', desc: 'Returns the current date and time.' },
+  { name: 'DATE', cat: 'Date & Time', syntax: 'DATE(year, month, day)', desc: 'Returns the number that represents the date.' },
+  { name: 'YEAR', cat: 'Date & Time', syntax: 'YEAR(serial_number)', desc: 'Returns the year of a date.' },
+  { name: 'MONTH', cat: 'Date & Time', syntax: 'MONTH(serial_number)', desc: 'Returns the month of a date, a number from 1 to 12.' },
+  { name: 'DAY', cat: 'Date & Time', syntax: 'DAY(serial_number)', desc: 'Returns the day of the month, a number from 1 to 31.' },
+  { name: 'WEEKDAY', cat: 'Date & Time', syntax: 'WEEKDAY(serial_number)', desc: 'Returns a number from 1 to 7 identifying the day of the week.' },
+  { name: 'EOMONTH', cat: 'Date & Time', syntax: 'EOMONTH(start_date, months)', desc: 'Returns the last day of the month before or after a number of months.' },
+  { name: 'EDATE', cat: 'Date & Time', syntax: 'EDATE(start_date, months)', desc: 'Returns the date that is the indicated number of months before or after the start date.' },
+  { name: 'NETWORKDAYS', cat: 'Date & Time', syntax: 'NETWORKDAYS(start_date, end_date)', desc: 'Returns the number of whole workdays between two dates.' },
+  { name: 'DAYS', cat: 'Date & Time', syntax: 'DAYS(end_date, start_date)', desc: 'Returns the number of days between two dates.' },
+  { name: 'VLOOKUP', cat: 'Lookup & Reference', syntax: 'VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup])', desc: 'Looks for a value in the leftmost column of a table, and returns a value in the same row from a column you specify.' },
+  { name: 'HLOOKUP', cat: 'Lookup & Reference', syntax: 'HLOOKUP(lookup_value, table_array, row_index_num, [range_lookup])', desc: 'Looks for a value in the top row of a table and returns the value in the same column from a row you specify.' },
+  { name: 'XLOOKUP', cat: 'Lookup & Reference', syntax: 'XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found])', desc: 'Searches a range for a match and returns the corresponding item from a second range.' },
+  { name: 'INDEX', cat: 'Lookup & Reference', syntax: 'INDEX(array, row_num, [column_num])', desc: 'Returns a value from a table or range by row and column.' },
+  { name: 'MATCH', cat: 'Lookup & Reference', syntax: 'MATCH(lookup_value, lookup_array, [match_type])', desc: 'Returns the relative position of an item in an array that matches a specified value.' },
+  { name: 'CHOOSE', cat: 'Lookup & Reference', syntax: 'CHOOSE(index_num, value1, [value2], ...)', desc: 'Chooses a value from a list of values based on an index number.' },
+  { name: 'ROWS', cat: 'Lookup & Reference', syntax: 'ROWS(array)', desc: 'Returns the number of rows in a reference or array.' },
+  { name: 'PMT', cat: 'Financial', syntax: 'PMT(rate, nper, pv, [fv], [type])', desc: 'Calculates the payment for a loan based on constant payments and a constant interest rate.' },
+  { name: 'PV', cat: 'Financial', syntax: 'PV(rate, nper, pmt, [fv], [type])', desc: 'Returns the present value of an investment.' },
+  { name: 'FV', cat: 'Financial', syntax: 'FV(rate, nper, pmt, [pv], [type])', desc: 'Returns the future value of an investment.' },
+  { name: 'NPV', cat: 'Financial', syntax: 'NPV(rate, value1, [value2], ...)', desc: 'Returns the net present value of an investment based on a discount rate and future cash flows.' },
+]
+
 /* ───────── formatting ───────── */
-export function formatValue(v: Val, fmt?: CellFmt): string {
+export function formatValue(v: Val, fmt?: CellFmt | string): string {
   if (v === null || v === undefined) return ''
   if (isErr(v)) return v.err
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE'
@@ -443,6 +872,29 @@ export function formatValue(v: Val, fmt?: CellFmt): string {
       return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     case 'int':
       return Math.round(v).toLocaleString('en-US')
+    case 'date': {
+      const d = new Date(Math.round((v - 25569) * 86400000))
+      return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`
+    }
+    case 'longdate':
+      return new Date(Math.round((v - 25569) * 86400000)).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    case 'time':
+      return new Date(Math.round((v - 25569) * 86400000)).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'UTC' })
+    case 'scientific':
+      return v.toExponential(2).toUpperCase().replace(/E([+-])(\d)$/, 'E$10$2')
+    case 'fraction': {
+      const whole = Math.trunc(v)
+      const frac = Math.abs(v - whole)
+      if (frac < 1e-9) return String(whole)
+      let best = [0, 1]
+      for (let d = 1; d <= 9; d++) {
+        const n = Math.round(frac * d)
+        if (Math.abs(frac - n / d) < Math.abs(frac - best[0] / best[1])) best = [n, d]
+      }
+      return `${whole ? whole + ' ' : v < 0 ? '-' : ''}${best[0]}/${best[1]}`
+    }
+    case 'text':
+      return String(v)
     default: {
       if (Number.isInteger(v)) return String(v)
       const s = Number(v.toPrecision(10)).toString()

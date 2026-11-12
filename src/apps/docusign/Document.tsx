@@ -162,7 +162,7 @@ function OrderFormP1({ drop, renewal, file }: { drop?: DropFn; renewal: boolean;
   )
 }
 
-function OfferP1({ file }: { file: string }) {
+function OfferP1({ file, drop }: { file: string; drop?: DropFn }) {
   const who = /Jordan/.test(file) ? 'Jordan Ellis' : /Maya/.test(file) ? 'Maya Johnson' : '[Candidate Name]'
   return (
     <>
@@ -176,19 +176,27 @@ function OfferP1({ file }: { file: string }) {
       <P>Dear {who.split(' ')[0]},</P>
       <P>We are delighted to offer you the position of Operations Analyst at Northwind Global Inc., reporting to Alex Morgan, Operations Manager. This letter sets out the principal terms of your employment.</P>
       <Table head={['Term', 'Detail']} rows={[['Position', 'Operations Analyst'], ['Base salary', '$92,000 per year'], ['Target bonus', '10% of base salary'], ['Equity', '1,200 RSUs (4-year vesting)'], ['Location', 'Boston, MA (hybrid)']]} />
-      {LOREM.slice(0, 3).map((t, i) => (
+      {LOREM.slice(0, drop ? 1 : 3).map((t, i) => (
         <P key={i}>{t}</P>
       ))}
+      {drop && (
+        <div className="mt-3 w-[300px] rounded border border-[#D1D5DB] p-3">
+          <div className="text-[10px] font-bold mb-2">Accepted by {who}</div>
+          <SigLine label="Signature" type="signature" drop={drop} />
+          <SigLine label="Printed Name" type="name" drop={drop} />
+          <SigLine label="Date" type="date" drop={drop} />
+        </div>
+      )}
     </>
   )
 }
 
-function Generic({ file, page }: { file: string; page: number }) {
+function Generic({ file, page, drop }: { file: string; page: number; drop?: DropFn }) {
   return (
     <>
       <Letterhead right={`Page ${page}`} />
       {page === 1 && <div className="text-[16px] font-bold mb-4 text-center uppercase tracking-wide">{titleFromFile(file)}</div>}
-      {Array.from({ length: page === 1 ? 2 : 3 }).map((_, k) => (
+      {Array.from({ length: page === 1 ? (drop ? 1 : 2) : 3 }).map((_, k) => (
         <div key={k}>
           <div className="text-[10px] font-bold text-[#1F3A5F] mb-1 mt-2">
             {page * 3 + k - 2}. {['Definitions', 'Confidentiality', 'Fees and Payment', 'Warranties', 'Limitation of Liability', 'Term and Termination', 'Governing Law'][(page * 3 + k) % 7]}
@@ -198,6 +206,16 @@ function Generic({ file, page }: { file: string; page: number }) {
           ))}
         </div>
       ))}
+      {drop && page === 1 && (
+        <div className="mt-4">
+          <div className="text-[10px] font-bold text-[#1F3A5F] uppercase tracking-wide mb-2">Acknowledged and agreed</div>
+          <div className="w-[300px] rounded border border-[#D1D5DB] p-3">
+            <SigLine label="Signature" type="signature" drop={drop} />
+            <SigLine label="Printed Name" type="name" drop={drop} />
+            <SigLine label="Date" type="date" drop={drop} />
+          </div>
+        </div>
+      )}
     </>
   )
 }
@@ -208,7 +226,7 @@ export function DocPage({ file, page = 1, drop, children, renewal }: { file: str
   const isOffer = /Offer_Letter/i.test(file)
   return (
     <div className="relative bg-white text-[#111827] shadow-[0_1px_4px_rgba(0,0,0,0.18)]" style={{ width: PAGE_W, height: PAGE_H, padding: '46px 56px', fontFamily: "'Open Sans', Arial, sans-serif" }}>
-      {page === 1 && isOrder ? <OrderFormP1 drop={drop} renewal={isRenewal} file={file} /> : page === 1 && isOffer ? <OfferP1 file={file} /> : <Generic file={file} page={page} />}
+      {page === 1 && isOrder ? <OrderFormP1 drop={drop} renewal={isRenewal} file={file} /> : page === 1 && isOffer ? <OfferP1 file={file} drop={drop} /> : <Generic file={file} page={page} drop={drop} />}
       <div className="absolute bottom-5 left-14 right-14 flex justify-between text-[8px] text-[#9CA3AF]">
         <span>Northwind Global Inc. — Confidential</span>
         <span>Page {page}</span>

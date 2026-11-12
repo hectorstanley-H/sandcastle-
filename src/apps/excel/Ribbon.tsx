@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { PopMenu, type MenuItem } from './ui'
 import {
   ClipboardPaste24Regular,
   Cut20Regular,
@@ -119,7 +120,15 @@ export interface RibbonActions {
   freeze: () => void
   analyze: () => void
   sort: () => void
-  state: { bold: boolean; italic: boolean; underline: boolean; fmt: CellFmt; align?: string }
+  state: { bold: boolean; italic: boolean; underline: boolean; fmt: CellFmt; align?: string; font?: string; size?: number; valign?: string; wrap?: boolean; strike?: boolean }
+  /** run a named ribbon command (label of the button) */
+  cmd: (key: string) => void
+  /** dropdown menus by command key */
+  menus: Record<string, MenuItem[]>
+  /** toggle states by command key */
+  on: Record<string, boolean>
+  setFont: (f: string) => void
+  setSize: (n: number) => void
 }
 
 const Group = ({ label, children, last }: { label: string; children: ReactNode; last?: boolean }) => (
@@ -129,30 +138,40 @@ const Group = ({ label, children, last }: { label: string; children: ReactNode; 
   </div>
 )
 
-function Big({ icon: I, label, agent, onClick, chevron, active }: { icon: any; label: string; agent?: string; onClick?: () => void; chevron?: boolean; active?: boolean }) {
+function Big({ icon: I, label, agent, onClick, chevron, active, onChevron }: { icon: any; label: string; agent?: string; onClick?: () => void; chevron?: boolean; active?: boolean; onChevron?: () => void }) {
   return (
     <button
       data-agent={agent}
       aria-label={label.replace('\n', ' ')}
-      onClick={onClick}
+      onClick={(e) => {
+        if (onChevron && (e.target as HTMLElement).closest?.('[data-chev]')) return onChevron()
+        onClick?.()
+      }}
       className={`flex flex-col items-center justify-start gap-0.5 min-w-[46px] max-w-[72px] h-[66px] px-1 pt-1 rounded hover:bg-[#EBEBEB] ${active ? 'bg-[#E0E0E0]' : ''}`}
     >
       <I className="w-7 h-7 shrink-0 text-[#424242]" style={{ fontSize: 28 }} />
       <span className="text-[11.5px] leading-[1.15] text-[#242424] text-center whitespace-pre-line">
         {label}
-        {chevron && <ChevronDown12Regular className="inline ml-0.5 -mt-0.5 text-[#616161]" />}
+        {chevron && (
+          <span data-chev className="inline-block">
+            <ChevronDown12Regular className="inline ml-0.5 -mt-0.5 text-[#616161]" />
+          </span>
+        )}
       </span>
     </button>
   )
 }
 
-function Small({ icon: I, label, agent, onClick, active, chevron, iconOnly, color }: { icon: any; label: string; agent?: string; onClick?: () => void; active?: boolean; chevron?: boolean; iconOnly?: boolean; color?: string }) {
+function Small({ icon: I, label, agent, onClick, active, chevron, iconOnly, color, onChevron }: { icon: any; label: string; agent?: string; onClick?: () => void; active?: boolean; chevron?: boolean; iconOnly?: boolean; color?: string; onChevron?: () => void }) {
   return (
     <button
       data-agent={agent}
       aria-label={label}
       title={label}
-      onClick={onClick}
+      onClick={(e) => {
+        if (onChevron && (e.target as HTMLElement).closest?.('[data-chev]')) return onChevron()
+        onClick?.()
+      }}
       className={`flex items-center gap-1 h-[22px] rounded px-1 text-[12px] text-[#242424] whitespace-nowrap hover:bg-[#EBEBEB] ${active ? 'bg-[#D6D6D6] hover:bg-[#CFCFCF]' : ''}`}
     >
       <span className="relative inline-flex">
@@ -160,7 +179,11 @@ function Small({ icon: I, label, agent, onClick, active, chevron, iconOnly, colo
         {color && <span className="absolute left-[2px] right-[2px] -bottom-[2px] h-[3px]" style={{ background: color }} />}
       </span>
       {!iconOnly && <span>{label}</span>}
-      {chevron && <ChevronDown12Regular className="text-[#616161]" />}
+      {chevron && (
+        <span data-chev className="inline-flex">
+          <ChevronDown12Regular className="text-[#616161]" />
+        </span>
+      )}
     </button>
   )
 }
@@ -200,66 +223,92 @@ const FMT_OPTIONS: [CellFmt, string][] = [
   ['int', 'Comma Style'],
 ]
 
+/** a ribbon control with an attached dropdown menu (rendered from act.menus[key]) */
+function WithMenu({ k, open, onClose, act, children, width }: { k: string; open: string | null; onClose: () => void; act: RibbonActions; children: ReactNode; width?: number }) {
+  return (
+    <div className="relative">
+      {children}
+      {open === k && act.menus[k] && <PopMenu items={act.menus[k]} onClose={onClose} width={width} />}
+    </div>
+  )
+}
+
 export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
   const [menu, setMenu] = useState<string | null>(null)
   const toggle = (m: string) => setMenu((x) => (x === m ? null : m))
   const close = () => setMenu(null)
+  /** button handler: open the command's menu if it has one, otherwise run it */
+  const run = (k: string) => () => (act.menus[k] ? toggle(k) : act.cmd(k))
 
   let body: ReactNode
   if (tab === 'home') {
     body = (
       <>
         <Group label="Clipboard">
-          <Big icon={ClipboardPaste24Regular} label={'Paste'} chevron />
+          <WithMenu k="Paste" open={menu} onClose={close} act={act}>
+            <Big icon={ClipboardPaste24Regular} label={'Paste'} chevron agent="excel-paste" onClick={() => act.cmd('Paste')} onChevron={() => toggle('Paste')} />
+          </WithMenu>
           <Col>
-            <Small icon={Cut20Regular} label="Cut" iconOnly />
-            <Small icon={Copy20Regular} label="Copy" iconOnly chevron />
-            <Small icon={PaintBrush20Regular} label="Format Painter" iconOnly />
+            <Small icon={Cut20Regular} label="Cut" agent="excel-cut" iconOnly onClick={() => act.cmd('Cut')} />
+            <Small icon={Copy20Regular} label="Copy" agent="excel-copy" iconOnly chevron onClick={() => act.cmd('Copy')} />
+            <Small icon={PaintBrush20Regular} label="Format Painter" agent="excel-format-painter" iconOnly active={act.on['Format Painter']} onClick={() => act.cmd('Format Painter')} />
           </Col>
         </Group>
         <Group label="Font">
           <Col>
             <Row>
-              <select aria-label="Font" className="h-[22px] w-[124px] text-[12px] border border-[#C7C7C7] rounded-sm px-1 bg-white outline-none" defaultValue="Aptos Narrow">
-                {['Aptos Narrow', 'Aptos', 'Aptos Display', 'Calibri', 'Arial', 'Segoe UI', 'Times New Roman'].map((f) => (
+              <select aria-label="Font" data-agent="excel-font-name" className="h-[22px] w-[124px] text-[12px] border border-[#C7C7C7] rounded-sm px-1 bg-white outline-none" value={act.state.font ?? 'Aptos Narrow'} onChange={(e) => act.setFont(e.target.value)}>
+                {['Aptos Narrow', 'Aptos', 'Aptos Display', 'Calibri', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas', 'Georgia'].map((f) => (
                   <option key={f}>{f}</option>
                 ))}
               </select>
-              <select aria-label="Font size" className="h-[22px] w-[44px] text-[12px] border border-[#C7C7C7] rounded-sm px-0.5 bg-white outline-none ml-0.5" defaultValue="11">
-                {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24].map((f) => (
+              <select aria-label="Font size" data-agent="excel-font-size" className="h-[22px] w-[44px] text-[12px] border border-[#C7C7C7] rounded-sm px-0.5 bg-white outline-none ml-0.5" value={String(act.state.size ?? 11)} onChange={(e) => act.setSize(Number(e.target.value))}>
+                {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36].map((f) => (
                   <option key={f}>{f}</option>
                 ))}
               </select>
-              <Small icon={FontIncrease20Regular} label="Increase Font Size" iconOnly />
-              <Small icon={FontDecrease20Regular} label="Decrease Font Size" iconOnly />
+              <Small icon={FontIncrease20Regular} label="Increase Font Size" iconOnly onClick={() => act.cmd('Increase Font Size')} />
+              <Small icon={FontDecrease20Regular} label="Decrease Font Size" iconOnly onClick={() => act.cmd('Decrease Font Size')} />
             </Row>
             <Row>
               <Small icon={TextBold20Regular} label="Bold" agent="excel-bold" iconOnly active={act.state.bold} onClick={act.bold} />
               <Small icon={TextItalic20Regular} label="Italic" agent="excel-italic" iconOnly active={act.state.italic} onClick={act.italic} />
-              <Small icon={TextUnderline20Regular} label="Underline" agent="excel-underline" iconOnly chevron active={act.state.underline} onClick={act.underline} />
+              <WithMenu k="Underline" open={menu} onClose={close} act={act}>
+                <Small icon={TextUnderline20Regular} label="Underline" agent="excel-underline" iconOnly chevron active={act.state.underline} onClick={act.underline} onChevron={() => toggle('Underline')} />
+              </WithMenu>
               <span className="w-px h-4 bg-[#E1E1E1] mx-0.5" />
-              <Small icon={BorderAll20Regular} label="Borders" iconOnly chevron />
-              <Small icon={PaintBucket20Regular} label="Fill Color" agent="excel-fill-color" iconOnly chevron color="#FFFF00" onClick={act.fill} />
-              <Small icon={TextColor20Regular} label="Font Color" agent="excel-font-color" iconOnly chevron color="#C00000" onClick={act.fontColor} />
+              <WithMenu k="Borders" open={menu} onClose={close} act={act}>
+                <Small icon={BorderAll20Regular} label="Borders" agent="excel-borders" iconOnly chevron onClick={() => act.cmd('Borders')} onChevron={() => toggle('Borders')} />
+              </WithMenu>
+              <WithMenu k="Fill Color" open={menu} onClose={close} act={act}>
+                <Small icon={PaintBucket20Regular} label="Fill Color" agent="excel-fill-color" iconOnly chevron color="#FFFF00" onClick={act.fill} onChevron={() => toggle('Fill Color')} />
+              </WithMenu>
+              <WithMenu k="Font Color" open={menu} onClose={close} act={act}>
+                <Small icon={TextColor20Regular} label="Font Color" agent="excel-font-color" iconOnly chevron color="#C00000" onClick={act.fontColor} onChevron={() => toggle('Font Color')} />
+              </WithMenu>
             </Row>
           </Col>
         </Group>
         <Group label="Alignment">
           <Col>
             <Row>
-              <Small icon={AlignTop20Regular} label="Top Align" iconOnly />
-              <Small icon={AlignCenterVertical20Regular} label="Middle Align" iconOnly />
-              <Small icon={AlignBottom20Regular} label="Bottom Align" iconOnly active />
-              <Small icon={TextFontSize20Regular} label="Orientation" iconOnly chevron />
-              <Small icon={TextWrap20Regular} label="Wrap Text" />
+              <Small icon={AlignTop20Regular} label="Top Align" iconOnly active={act.state.valign === 'top'} onClick={() => act.cmd('Top Align')} />
+              <Small icon={AlignCenterVertical20Regular} label="Middle Align" iconOnly active={act.state.valign === 'middle'} onClick={() => act.cmd('Middle Align')} />
+              <Small icon={AlignBottom20Regular} label="Bottom Align" iconOnly active={!act.state.valign || act.state.valign === 'bottom'} onClick={() => act.cmd('Bottom Align')} />
+              <WithMenu k="Orientation" open={menu} onClose={close} act={act}>
+                <Small icon={TextFontSize20Regular} label="Orientation" iconOnly chevron onClick={() => toggle('Orientation')} />
+              </WithMenu>
+              <Small icon={TextWrap20Regular} label="Wrap Text" agent="excel-wrap-text" active={act.state.wrap} onClick={() => act.cmd('Wrap Text')} />
             </Row>
             <Row>
               <Small icon={TextAlignLeft20Regular} label="Align Left" agent="excel-align-left" iconOnly active={act.state.align === 'left'} onClick={() => act.align('left')} />
               <Small icon={TextAlignCenter20Regular} label="Center" agent="excel-align-center" iconOnly active={act.state.align === 'center'} onClick={() => act.align('center')} />
               <Small icon={TextAlignRight20Regular} label="Align Right" agent="excel-align-right" iconOnly active={act.state.align === 'right'} onClick={() => act.align('right')} />
-              <Small icon={TextIndentDecrease20Regular} label="Decrease Indent" iconOnly />
-              <Small icon={TextIndentIncrease20Regular} label="Increase Indent" iconOnly />
-              <Small icon={TableCellsMerge20Regular} label="Merge & Center" chevron />
+              <Small icon={TextIndentDecrease20Regular} label="Decrease Indent" iconOnly onClick={() => act.cmd('Decrease Indent')} />
+              <Small icon={TextIndentIncrease20Regular} label="Increase Indent" iconOnly onClick={() => act.cmd('Increase Indent')} />
+              <WithMenu k="Merge & Center" open={menu} onClose={close} act={act}>
+                <Small icon={TableCellsMerge20Regular} label="Merge & Center" agent="excel-merge" chevron onClick={() => act.cmd('Merge & Center')} onChevron={() => toggle('Merge & Center')} />
+              </WithMenu>
             </Row>
           </Col>
         </Group>
@@ -277,6 +326,7 @@ export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
                   {l}
                 </option>
               ))}
+              {!FMT_OPTIONS.some(([v]) => v === act.state.fmt) && <option value={act.state.fmt}>More Number Formats…</option>}
             </select>
             <Row>
               <Small icon={Money20Regular} label="Accounting Number Format" agent="excel-fmt-currency" iconOnly chevron onClick={() => act.fmt('currency')} />
@@ -292,26 +342,36 @@ export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
           </Col>
         </Group>
         <Group label="Styles">
-          <Big icon={TableSettings20Regular} label={'Conditional\nFormatting'} chevron />
-          <Big icon={Table24Regular} label={'Format as\nTable'} chevron agent="excel-format-table" onClick={act.formatTable} />
-          <Big icon={PaintBrush20Regular} label={'Cell\nStyles'} chevron />
+          <WithMenu k="Conditional Formatting" open={menu} onClose={close} act={act} width={250}>
+            <Big icon={TableSettings20Regular} label={'Conditional\nFormatting'} chevron agent="excel-conditional-formatting" onClick={() => toggle('Conditional Formatting')} />
+          </WithMenu>
+          <WithMenu k="Format as Table" open={menu} onClose={close} act={act}>
+            <Big icon={Table24Regular} label={'Format as\nTable'} chevron agent="excel-format-table" onClick={act.formatTable} onChevron={() => toggle('Format as Table')} />
+          </WithMenu>
+          <WithMenu k="Cell Styles" open={menu} onClose={close} act={act}>
+            <Big icon={PaintBrush20Regular} label={'Cell\nStyles'} chevron agent="excel-cell-styles" onClick={() => toggle('Cell Styles')} />
+          </WithMenu>
         </Group>
         <Group label="Cells">
           <Col>
-            <Small icon={TableInsertRow20Regular} label="Insert" agent="excel-insert-row" chevron onClick={act.insertRow} />
-            <Small icon={TableDeleteRow20Regular} label="Delete" agent="excel-delete-row" chevron onClick={act.deleteRow} />
+            <WithMenu k="Insert" open={menu} onClose={close} act={act}>
+              <Small icon={TableInsertRow20Regular} label="Insert" agent="excel-insert-row" chevron onClick={act.insertRow} onChevron={() => toggle('Insert')} />
+            </WithMenu>
+            <WithMenu k="Delete" open={menu} onClose={close} act={act}>
+              <Small icon={TableDeleteRow20Regular} label="Delete" agent="excel-delete-row" chevron onClick={act.deleteRow} onChevron={() => toggle('Delete')} />
+            </WithMenu>
             <div className="relative">
               <Small icon={TableSimple20Regular} label="Format" agent="excel-format-menu" chevron onClick={() => toggle('format')} />
               {menu === 'format' && (
                 <Menu
                   onClose={close}
                   items={[
-                    { label: 'Row Height…', onClick: () => {} },
-                    { label: 'AutoFit Row Height', onClick: () => {} },
-                    { label: 'Column Width…', onClick: () => {} },
+                    { label: 'Row Height…', onClick: () => act.cmd('Row Height') },
+                    { label: 'AutoFit Row Height', onClick: () => act.cmd('AutoFit Row Height') },
+                    { label: 'Column Width…', onClick: () => act.cmd('Column Width') },
                     { label: 'AutoFit Column Width', agent: 'excel-autofit', onClick: act.autofit },
-                    { label: 'Default Width…', onClick: () => {} },
-                    { label: 'Format Cells…', onClick: () => {} },
+                    { label: 'Default Width…', onClick: () => act.cmd('Default Width') },
+                    { label: 'Format Cells…', onClick: () => act.cmd('Format Cells') },
                   ]}
                 />
               )}
@@ -321,9 +381,23 @@ export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
         <Group label="Editing">
           <Col>
             <Row>
-              <button data-agent="excel-autosum" aria-label="AutoSum" onClick={act.autosum} className="flex items-center gap-1 h-[22px] rounded px-1 text-[12px] hover:bg-[#EBEBEB]">
-                <span className="w-[18px] text-center text-[15px] font-semibold text-[#424242] leading-none">Σ</span> AutoSum <ChevronDown12Regular className="text-[#616161]" />
-              </button>
+              <div className="relative">
+                <button
+                  data-agent="excel-autosum"
+                  aria-label="AutoSum"
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest?.('[data-chev]')) return toggle('AutoSum')
+                    act.autosum()
+                  }}
+                  className="flex items-center gap-1 h-[22px] rounded px-1 text-[12px] hover:bg-[#EBEBEB]"
+                >
+                  <span className="w-[18px] text-center text-[15px] font-semibold text-[#424242] leading-none">Σ</span> AutoSum{' '}
+                  <span data-chev className="inline-flex">
+                    <ChevronDown12Regular className="text-[#616161]" />
+                  </span>
+                </button>
+                {menu === 'AutoSum' && act.menus['AutoSum'] && <PopMenu items={act.menus['AutoSum']} onClose={close} width={200} />}
+              </div>
             </Row>
             <div className="relative">
               <Small icon={ArrowDown20Regular} label="Fill" agent="excel-fill" chevron onClick={() => toggle('fill')} />
@@ -333,24 +407,30 @@ export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
                   items={[
                     { label: 'Down', agent: 'excel-fill-down', onClick: act.fillDown, icon: ArrowDown20Regular },
                     { label: 'Right', agent: 'excel-fill-right', onClick: act.fillRight },
-                    { label: 'Up', onClick: () => {} },
-                    { label: 'Left', onClick: () => {} },
-                    { label: 'Series…', onClick: () => {} },
-                    { label: 'Flash Fill', onClick: () => {}, icon: Flash20Regular },
+                    { label: 'Up', onClick: () => act.cmd('Fill Up') },
+                    { label: 'Left', onClick: () => act.cmd('Fill Left') },
+                    { label: 'Series…', onClick: () => act.cmd('Series') },
+                    { label: 'Flash Fill', onClick: () => act.cmd('Flash Fill'), icon: Flash20Regular },
                   ]}
                 />
               )}
             </div>
-            <Small icon={Eraser20Regular} label="Clear" agent="excel-clear" chevron onClick={act.clear} />
+            <WithMenu k="Clear" open={menu} onClose={close} act={act}>
+              <Small icon={Eraser20Regular} label="Clear" agent="excel-clear" chevron onClick={act.clear} onChevron={() => toggle('Clear')} />
+            </WithMenu>
           </Col>
-          <Big icon={ArrowSort20Regular} label={'Sort &\nFilter'} chevron agent="excel-sort" onClick={act.sort} />
-          <Big icon={Search20Regular} label={'Find &\nSelect'} chevron />
+          <WithMenu k="Sort & Filter" open={menu} onClose={close} act={act}>
+            <Big icon={ArrowSort20Regular} label={'Sort &\nFilter'} chevron agent="excel-sort" onClick={() => toggle('Sort & Filter')} />
+          </WithMenu>
+          <WithMenu k="Find & Select" open={menu} onClose={close} act={act}>
+            <Big icon={Search20Regular} label={'Find &\nSelect'} chevron agent="excel-find-select" onClick={() => toggle('Find & Select')} />
+          </WithMenu>
         </Group>
         <Group label="Analysis">
           <Big icon={ChartPerson20Regular} label={'Analyze\nData'} agent="excel-analyze" onClick={act.analyze} />
         </Group>
         <Group label="Copilot" last>
-          <Big icon={Sparkle20Regular} label={'Copilot'} />
+          <Big icon={Sparkle20Regular} label={'Copilot'} agent="excel-copilot" active={act.on['Copilot']} onClick={() => act.cmd('Copilot')} />
         </Group>
       </>
     )
@@ -358,16 +438,22 @@ export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
     body = (
       <>
         <Group label="Tables">
-          <Big icon={CubeTree20Regular} label={'PivotTable'} chevron />
-          <Big icon={TableAdd24Regular} label={'Recommended\nPivotTables'} />
+          <WithMenu k="PivotTable" open={menu} onClose={close} act={act}>
+            <Big icon={CubeTree20Regular} label={'PivotTable'} chevron agent="excel-insert-pivot" onClick={() => act.cmd('PivotTable')} onChevron={() => toggle('PivotTable')} />
+          </WithMenu>
+          <Big icon={TableAdd24Regular} label={'Recommended\nPivotTables'} onClick={() => act.cmd('Recommended PivotTables')} />
           <Big icon={Table24Regular} label={'Table'} agent="excel-insert-table" onClick={act.formatTable} />
         </Group>
         <Group label="Illustrations">
-          <Big icon={Image20Regular} label={'Pictures'} chevron />
+          <Big icon={Image20Regular} label={'Pictures'} chevron onClick={() => act.cmd('Pictures')} />
           <Col>
-            <Small icon={Shapes20Regular} label="Shapes" chevron />
-            <Small icon={Icons20Regular} label="Icons" />
-            <Small icon={ShapeIntersect20Regular} label="3D Models" chevron />
+            <WithMenu k="Shapes" open={menu} onClose={close} act={act}>
+              <Small icon={Shapes20Regular} label="Shapes" chevron onClick={() => toggle('Shapes')} />
+            </WithMenu>
+            <WithMenu k="Icons" open={menu} onClose={close} act={act}>
+              <Small icon={Icons20Regular} label="Icons" onClick={() => toggle('Icons')} />
+            </WithMenu>
+            <Small icon={ShapeIntersect20Regular} label="3D Models" chevron onClick={() => act.cmd('3D Models')} />
           </Col>
         </Group>
         <Group label="Charts">
@@ -375,42 +461,46 @@ export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
           <Col>
             <Row>
               <Small icon={DataBarVertical20Regular} label="Insert Column or Bar Chart" agent="excel-insert-column-chart" iconOnly chevron onClick={act.insertChart} />
-              <Small icon={DataLine20Regular} label="Insert Line or Area Chart" iconOnly chevron />
-              <Small icon={DataPie20Regular} label="Insert Pie or Doughnut Chart" iconOnly chevron />
+              <Small icon={DataLine20Regular} label="Insert Line or Area Chart" agent="excel-insert-line-chart" iconOnly chevron onClick={() => act.cmd('Line Chart')} />
+              <Small icon={DataPie20Regular} label="Insert Pie or Doughnut Chart" agent="excel-insert-pie-chart" iconOnly chevron onClick={() => act.cmd('Pie Chart')} />
             </Row>
             <Row>
-              <Small icon={DataBarVertical20Regular} label="Insert Hierarchy Chart" iconOnly chevron />
-              <Small icon={DataArea20Regular} label="Insert Statistic Chart" iconOnly chevron />
-              <Small icon={DataLine20Regular} label="Insert Scatter Chart" iconOnly chevron />
+              <Small icon={DataBarVertical20Regular} label="Insert Hierarchy Chart" iconOnly chevron onClick={() => act.cmd('Bar Chart')} />
+              <Small icon={DataArea20Regular} label="Insert Statistic Chart" iconOnly chevron onClick={() => act.cmd('Area Chart')} />
+              <Small icon={DataLine20Regular} label="Insert Scatter Chart" iconOnly chevron onClick={() => act.cmd('Line Chart')} />
             </Row>
           </Col>
-          <Big icon={DataBarVertical24Regular} label={'Maps'} chevron />
-          <Big icon={CubeTree20Regular} label={'PivotChart'} chevron />
+          <Big icon={DataBarVertical24Regular} label={'Maps'} chevron onClick={() => act.cmd('Maps')} />
+          <Big icon={CubeTree20Regular} label={'PivotChart'} chevron onClick={() => act.cmd('PivotChart')} />
         </Group>
         <Group label="Sparklines">
           <Col>
-            <Small icon={DataLine20Regular} label="Line" />
-            <Small icon={DataBarVertical20Regular} label="Column" />
-            <Small icon={DataArea20Regular} label="Win/Loss" />
+            <Small icon={DataLine20Regular} label="Line" onClick={() => act.cmd('Sparkline Line')} />
+            <Small icon={DataBarVertical20Regular} label="Column" onClick={() => act.cmd('Sparkline Column')} />
+            <Small icon={DataArea20Regular} label="Win/Loss" onClick={() => act.cmd('Sparkline Win/Loss')} />
           </Col>
         </Group>
         <Group label="Filters">
           <Col>
-            <Small icon={Filter20Regular} label="Slicer" />
-            <Small icon={Filter20Regular} label="Timeline" />
+            <Small icon={Filter20Regular} label="Slicer" onClick={() => act.cmd('Filter')} />
+            <Small icon={Filter20Regular} label="Timeline" onClick={() => act.cmd('Timeline')} />
           </Col>
         </Group>
         <Group label="Links">
-          <Big icon={Link20Regular} label={'Link'} chevron />
+          <Big icon={Link20Regular} label={'Link'} chevron agent="excel-insert-link" onClick={() => act.cmd('Link')} />
         </Group>
         <Group label="Comments">
-          <Big icon={Comment20Regular} label={'Comment'} />
+          <Big icon={Comment20Regular} label={'Comment'} agent="excel-insert-comment" onClick={() => act.cmd('New Comment')} />
         </Group>
         <Group label="Text">
-          <Big icon={TextT20Regular} label={'Text'} chevron />
+          <WithMenu k="Text" open={menu} onClose={close} act={act}>
+            <Big icon={TextT20Regular} label={'Text'} chevron onClick={() => toggle('Text')} />
+          </WithMenu>
         </Group>
         <Group label="Symbols" last>
-          <Big icon={Symbols20Regular} label={'Symbols'} chevron />
+          <WithMenu k="Symbols" open={menu} onClose={close} act={act} width={180}>
+            <Big icon={Symbols20Regular} label={'Symbols'} chevron onClick={() => toggle('Symbols')} />
+          </WithMenu>
         </Group>
       </>
     )
@@ -470,9 +560,16 @@ export function Ribbon({ tab, act }: { tab: RibbonTab; act: RibbonActions }) {
     const groups = simple[tab] ?? []
     body = groups.map(([g, items], gi) => (
       <Group key={g} label={g} last={gi === groups.length - 1}>
-        {items.map(([I, l], i) => (
-          <Big key={i} icon={I} label={l} />
-        ))}
+        {items.map(([I, l], i) => {
+          // the two "Pen" buttons on the Draw tab are different pens
+          const k = l === 'Pen' ? `Pen ${i}` : l.replace(/\n/g, ' ')
+          const hasMenu = !!act.menus[k]
+          return (
+            <WithMenu key={i} k={k} open={menu} onClose={close} act={act} width={hasMenu ? 230 : undefined}>
+              <Big icon={I} label={l} chevron={hasMenu} active={act.on[k]} onClick={run(k)} />
+            </WithMenu>
+          )
+        })}
       </Group>
     ))
   }

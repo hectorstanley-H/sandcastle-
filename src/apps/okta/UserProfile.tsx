@@ -4,9 +4,10 @@ import { db, uid, useCollection, useRecord } from '@/db/db'
 import { useDesk } from '@/os/context'
 import { logoUrl } from '@/os/registry'
 import {
-  addLog, appTarget, Btn, fmtOkta, fmtOktaTime, fullName, HWChip, isFresh, Modal, StatusBadge, userTarget,
+  addLog, appTarget, Btn, fmtOkta, fmtOktaTime, fullName, HWChip, inputCls, isFresh, Modal, StatusBadge, userTarget,
   type OktaApp, type OktaAssignment, type OktaUser, type Route,
 } from './shared'
+import { ADMIN_ROLES, PickModal } from './AdminMore'
 
 const TABS: [string, string][] = [
   ['applications', 'Applications'],
@@ -20,7 +21,8 @@ export function UserProfile({ route, go }: { route: Route; go: (r: Route) => voi
   const { isAgent } = useDesk()
   const u = useRecord<OktaUser>('okta.users', route.userId)
   const tab = route.tab ?? 'applications'
-  const [modal, setModal] = useState<null | 'activate' | 'assign' | 'mfa' | 'suspend' | 'password'>(null)
+  const [modal, setModal] = useState<null | 'activate' | 'assign' | 'mfa' | 'suspend' | 'password' | 'setpw' | 'deactivate' | 'delete'>(null)
+  const [pw, setPw] = useState({ a: '', b: '' })
   const [more, setMore] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -70,6 +72,15 @@ export function UserProfile({ route, go }: { route: Route; go: (r: Route) => voi
               <Btn agent="okta-user-suspend" label="Suspend" onClick={() => setModal('suspend')}>Suspend</Btn>
             </>
           )}
+          {u.status === 'LOCKED_OUT' && (
+            <Btn primary agent="okta-user-unlock" label="Unlock" onClick={() => { db.update('okta.users', u.id, { status: 'ACTIVE', ...stamp() }); addLog(isAgent, 'user.account.unlock', 'Unlock user account', [userTarget(u)]); setNotice(`${name} has been unlocked.`) }}>Unlock</Btn>
+          )}
+          {u.status === 'DEPROVISIONED' && (
+            <>
+              <Btn primary agent="okta-user-reactivate" label="Activate" onClick={() => { db.update('okta.users', u.id, { status: 'PROVISIONED', ...stamp() }); addLog(isAgent, 'user.lifecycle.reactivate', 'Reactivate Okta user', [userTarget(u)]); setNotice(`${name} was reactivated. An activation email was sent to ${u.email}.`) }}>Activate</Btn>
+              <Btn danger agent="okta-user-delete" label="Delete" onClick={() => setModal('delete')}>Delete</Btn>
+            </>
+          )}
           {u.status === 'SUSPENDED' && (
             <Btn primary agent="okta-user-unsuspend" label="Unsuspend" onClick={() => { db.update('okta.users', u.id, { status: 'ACTIVE', ...stamp() }); addLog(isAgent, 'user.lifecycle.unsuspend', 'Unsuspend Okta user', [userTarget(u)]) }}>Unsuspend</Btn>
           )}
@@ -78,8 +89,15 @@ export function UserProfile({ route, go }: { route: Route; go: (r: Route) => voi
             <Btn agent="okta-user-more" label="More Actions" onClick={() => setMore(!more)}>More Actions <CaretDown size={13} /></Btn>
             {more && (
               <div className="absolute left-0 top-10 z-20 w-56 bg-white rounded-md border border-[#E1E1E6] shadow-[0_8px_24px_rgba(29,29,33,0.16)] py-1 text-[14px]">
-                {['Clear User Sessions', 'Expire Password', 'Set Password', 'Deactivate'].map((x) => (
-                  <button key={x} onClick={() => setMore(false)} className={`w-full text-left px-4 h-9 hover:bg-[#F4F4F4] ${x === 'Deactivate' ? 'text-[#DA372C]' : ''}`}>{x}</button>
+                {(
+                  [
+                    ['Clear User Sessions', u.status === 'DEPROVISIONED', () => { addLog(isAgent, 'user.session.clear', 'Clear user session', [userTarget(u)]); setNotice(`All active sessions for ${name} were cleared. They'll need to sign in again.`) }],
+                    ['Expire Password', !isActiveLike, () => { db.update('okta.users', u.id, { status: 'PASSWORD_EXPIRED', ...stamp() }); addLog(isAgent, 'user.account.expire_password', 'Expire user password', [userTarget(u)]); setNotice(`${name}'s password has expired. They'll choose a new one at next sign-in.`) }],
+                    ['Set Password', u.status === 'DEPROVISIONED', () => { setPw({ a: '', b: '' }); setModal('setpw') }],
+                    ['Deactivate', u.status === 'DEPROVISIONED', () => setModal('deactivate')],
+                  ] as [string, boolean, () => void][]
+                ).map(([x, off, fn]) => (
+                  <button key={x} role="menuitem" disabled={off} onClick={() => { setMore(false); fn() }} className={`w-full text-left px-4 h-9 hover:bg-[#F4F4F4] disabled:text-[#A0A0A8] disabled:hover:bg-white ${x === 'Deactivate' && !off ? 'text-[#DA372C]' : ''}`}>{x}</button>
                 ))}
               </div>
             )}
@@ -110,8 +128,8 @@ export function UserProfile({ route, go }: { route: Route; go: (r: Route) => voi
       <div className="px-8 pt-6 flex gap-6 items-start">
         <div className="flex-1 min-w-0">
           {tab === 'applications' && <AppsTab u={u} onAssign={() => setModal('assign')} />}
-          {tab === 'groups' && <GroupsTab u={u} />}
-          {tab === 'profile' && <ProfileTab u={u} />}
+          {tab === 'groups' && <GroupsTab u={u} go={go} />}
+          {tab === 'profile' && <ProfileTab u={u} onSaved={() => setNotice(`${name}'s profile was updated.`)} />}
           {tab === 'devices' && <DevicesTab u={u} />}
           {tab === 'roles' && <RolesTab u={u} />}
         </div>
@@ -128,6 +146,43 @@ export function UserProfile({ route, go }: { route: Route; go: (r: Route) => voi
           footer={<><Btn label="Cancel" onClick={() => setModal(null)}>Cancel</Btn><Btn primary agent="okta-suspend-confirm" label="Suspend" onClick={() => { db.update('okta.users', u.id, { status: 'SUSPENDED', ...stamp() }); addLog(isAgent, 'user.lifecycle.suspend', 'Suspend Okta user', [userTarget(u)]); setModal(null); setNotice(`${name} has been suspended.`) }}>Suspend</Btn></>}
         >
           Are you sure you want to suspend <b>{name}</b>? They won't be able to sign in until unsuspended. Their app assignments are kept.
+        </Modal>
+      )}
+      {modal === 'setpw' && (
+        <Modal
+          title="Set Password"
+          onClose={() => setModal(null)}
+          footer={<><Btn label="Cancel" onClick={() => setModal(null)}>Cancel</Btn><Btn primary label="Set password" disabled={pw.a.length < 12 || pw.a !== pw.b} onClick={() => { db.update('okta.users', u.id, { passwordChanged: new Date().toISOString(), status: u.status === 'PASSWORD_EXPIRED' || u.status === 'LOCKED_OUT' ? 'ACTIVE' : u.status, ...stamp() }); addLog(isAgent, 'user.account.update_password', 'Admin set user password', [userTarget(u)]); setModal(null); setNotice(`A new password was set for ${name}.`) }}>Set password</Btn></>}
+        >
+          <p className="mb-3">Set a temporary password for <b>{name}</b>. Password policy: at least 12 characters.</p>
+          <label className="block mb-3">
+            <span className="block text-[13px] font-semibold mb-1">New password</span>
+            <input type="password" aria-label="New password" value={pw.a} onChange={(e) => setPw({ ...pw, a: e.target.value })} className={inputCls} autoComplete="new-password" />
+          </label>
+          <label className="block">
+            <span className="block text-[13px] font-semibold mb-1">Repeat password</span>
+            <input type="password" aria-label="Repeat password" value={pw.b} onChange={(e) => setPw({ ...pw, b: e.target.value })} className={inputCls} autoComplete="new-password" />
+          </label>
+          {pw.a && pw.a.length < 12 && <div className="text-[12px] text-[#B42318] mt-2">Password must be at least 12 characters.</div>}
+          {pw.b && pw.a !== pw.b && <div className="text-[12px] text-[#B42318] mt-1">Passwords don’t match.</div>}
+        </Modal>
+      )}
+      {modal === 'deactivate' && (
+        <Modal
+          title="Deactivate Person"
+          onClose={() => setModal(null)}
+          footer={<><Btn label="Cancel" onClick={() => setModal(null)}>Cancel</Btn><Btn danger agent="okta-deactivate-confirm" label="Deactivate" onClick={() => { db.update('okta.users', u.id, { status: 'DEPROVISIONED', ...stamp() }); addLog(isAgent, 'user.lifecycle.deactivate', 'Deactivate Okta user', [userTarget(u)]); setModal(null); setNotice(`${name} has been deactivated.`) }}>Deactivate</Btn></>}
+        >
+          Deactivate <b>{name}</b>? They’ll lose access to Okta and every assigned app immediately, and app accounts with provisioning will be deactivated.
+        </Modal>
+      )}
+      {modal === 'delete' && (
+        <Modal
+          title="Delete Person"
+          onClose={() => setModal(null)}
+          footer={<><Btn label="Cancel" onClick={() => setModal(null)}>Cancel</Btn><Btn danger label="Delete" onClick={() => { for (const a of db.get<OktaAssignment>('okta.assignments').filter((x) => x.userId === u.id)) db.remove('okta.assignments', a.id); db.remove('okta.users', u.id); addLog(isAgent, 'user.lifecycle.delete.completed', 'Delete Okta user', [userTarget(u)]); go({ area: 'admin', page: 'people' }) }}>Delete</Btn></>}
+        >
+          Permanently delete <b>{name}</b>? Their profile and app assignments are removed. This can’t be undone.
         </Modal>
       )}
       {modal === 'password' && (
@@ -225,35 +280,72 @@ function AppsTab({ u, onAssign }: { u: OktaUser; onAssign: () => void }) {
   )
 }
 
-function GroupsTab({ u }: { u: OktaUser }) {
+function GroupsTab({ u, go }: { u: OktaUser; go: (r: Route) => void }) {
+  const { isAgent } = useDesk()
   const groups = useCollection('okta.groups')
+  const [picking, setPicking] = useState(false)
   const mine = groups.filter((g) => u.groups.includes(g.id))
+  const gt = (g: any) => ({ type: 'UserGroup', displayName: g.name, alternateId: g.id })
+  const stamp = { updatedBy: isAgent ? 'hworker' : 'alex', updatedAt: new Date().toISOString() }
+  const add = (gid: string) => {
+    const g = groups.find((x) => x.id === gid)
+    const cur = db.find<OktaUser>('okta.users', u.id)
+    if (!g || !cur || cur.groups.includes(gid)) return
+    db.update('okta.users', u.id, { groups: [...cur.groups, gid], ...stamp })
+    for (const appId of g.apps ?? [])
+      if (!db.get<OktaAssignment>('okta.assignments').some((a) => a.userId === u.id && a.appId === appId))
+        db.insert('okta.assignments', { id: uid('okta-as'), userId: u.id, appId, assignedAt: new Date().toISOString(), assignedBy: isAgent ? 'hworker' : 'alex', scope: 'GROUP', group: g.name, appUsername: u.login })
+    addLog(isAgent, 'group.user_membership.add', 'Add user to group membership', [userTarget(u), gt(g)])
+  }
+  const remove = (g: any) => {
+    db.update('okta.users', u.id, { groups: u.groups.filter((x) => x !== g.id), ...stamp })
+    for (const a of db.get<OktaAssignment>('okta.assignments').filter((a) => a.userId === u.id && a.scope === 'GROUP' && a.group === g.name)) db.remove('okta.assignments', a.id)
+    addLog(isAgent, 'group.user_membership.remove', 'Remove user from group membership', [userTarget(u), gt(g)])
+  }
   return (
     <div className="bg-white rounded-lg border border-[#E1E1E6]">
-      <div className="p-4 flex items-center"><Btn primary label="Assign to group">Assign to group</Btn></div>
+      <div className="p-4 flex items-center"><Btn primary agent="okta-user-assign-group" label="Assign to group" onClick={() => setPicking(true)}>Assign to group</Btn></div>
       <table className="w-full text-[14px]">
-        <thead><tr className="text-left text-[12px] text-[#46464F] border-y border-[#E1E1E6] bg-[#FAFAFA]"><th className="px-4 py-2.5 font-semibold">Group</th><th className="px-3 py-2.5 font-semibold">Membership</th><th className="px-3 py-2.5 font-semibold">Source</th></tr></thead>
+        <thead><tr className="text-left text-[12px] text-[#46464F] border-y border-[#E1E1E6] bg-[#FAFAFA]"><th className="px-4 py-2.5 font-semibold">Group</th><th className="px-3 py-2.5 font-semibold">Membership</th><th className="px-3 py-2.5 font-semibold">Source</th><th className="w-12" /></tr></thead>
         <tbody>
           {mine.map((g) => (
             <tr key={g.id} className="border-b border-[#EBEBED] last:border-0">
-              <td className="px-4 py-2.5"><div className="flex items-center gap-3"><span className="w-8 h-8 rounded-md bg-[#EEEEF0] flex items-center justify-center"><UsersThree size={17} /></span><div><div className="text-[#1662DD] font-semibold">{g.name}</div><div className="text-[12px] text-[#6E6E78]">{g.description}</div></div></div></td>
+              <td className="px-4 py-2.5"><div className="flex items-center gap-3"><span className="w-8 h-8 rounded-md bg-[#EEEEF0] flex items-center justify-center"><UsersThree size={17} /></span><div><button onClick={() => go({ area: 'admin', page: 'group', groupId: g.id })} className="text-[#1662DD] font-semibold hover:underline">{g.name}</button><div className="text-[12px] text-[#6E6E78]">{g.description}</div></div></div></td>
               <td className="px-3 py-2.5 text-[13px]">{g.type === 'APP_GROUP' ? 'Pushed by app' : g.type === 'BUILT_IN' ? 'Built-in' : 'Rule / manual'}</td>
               <td className="px-3 py-2.5 text-[13px]">{g.source ?? 'Okta'}</td>
+              <td className="pr-3">
+                {g.type === 'OKTA_GROUP' && (
+                  <button aria-label={`Remove from ${g.name}`} onClick={() => remove(g)} className="w-8 h-8 rounded flex items-center justify-center text-[#6E6E78] hover:bg-[#F4F4F4]"><X size={14} /></button>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {picking && (
+        <PickModal
+          title={`Assign ${fullName(u)} to groups`}
+          verb="Add"
+          items={groups.filter((g) => g.type === 'OKTA_GROUP').map((g) => ({ id: g.id, label: g.name, sub: g.description, done: u.groups.includes(g.id) }))}
+          onPick={add}
+          onClose={() => setPicking(false)}
+        />
+      )}
     </div>
   )
 }
 
-function ProfileTab({ u }: { u: OktaUser }) {
+const EDITABLE = new Set(['secondEmail', 'title', 'department', 'mobilePhone', 'city', 'state', 'employeeNumber'])
+
+function ProfileTab({ u, onSaved }: { u: OktaUser; onSaved: () => void }) {
+  const { isAgent } = useDesk()
+  const [draft, setDraft] = useState<Record<string, string> | null>(null)
   const rows: [string, string, string][] = [
     ['Username', 'login', u.login],
     ['First name', 'firstName', u.firstName],
     ['Last name', 'lastName', u.lastName],
     ['Primary email', 'email', u.email],
-    ['Secondary email', 'secondEmail', ''],
+    ['Secondary email', 'secondEmail', (u as any).secondEmail ?? ''],
     ['Title', 'title', u.title],
     ['Department', 'department', u.department],
     ['Manager', 'manager', u.manager],
@@ -273,7 +365,28 @@ function ProfileTab({ u }: { u: OktaUser }) {
           <div className="text-[16px] font-semibold">Attributes</div>
           <div className="text-[13px] text-[#6E6E78]">Some attributes are mastered by {(u as any).source ?? 'Okta'} and can't be edited here.</div>
         </div>
-        <Btn small label="Edit">Edit</Btn>
+        {draft ? (
+          <div className="flex gap-2">
+            <Btn small label="Cancel" onClick={() => setDraft(null)}>Cancel</Btn>
+            <Btn
+              small
+              primary
+              agent="okta-profile-save"
+              label="Save"
+              onClick={() => {
+                const { city, state, ...rest } = draft
+                db.update('okta.users', u.id, { ...rest, location: [city, state].filter(Boolean).join(', '), updatedBy: isAgent ? 'hworker' : 'alex', updatedAt: new Date().toISOString() })
+                addLog(isAgent, 'user.account.update_profile', 'Update user profile for Okta', [userTarget(u)])
+                setDraft(null)
+                onSaved()
+              }}
+            >
+              Save
+            </Btn>
+          </div>
+        ) : (
+          <Btn small agent="okta-profile-edit" label="Edit" onClick={() => setDraft(Object.fromEntries(rows.filter(([, v]) => EDITABLE.has(v)).map(([, v, val]) => [v, val])))}>Edit</Btn>
+        )}
       </div>
       <dl className="border-t border-[#E1E1E6]">
         {rows.map(([k, v, val]) => (
@@ -282,7 +395,13 @@ function ProfileTab({ u }: { u: OktaUser }) {
               <div className="font-medium">{k}</div>
               <div className="text-[12px] text-[#6E6E78] font-mono">{v}</div>
             </dt>
-            <dd className="text-[#1D1D21] self-center">{val || <span className="text-[#A0A0A8]">—</span>}</dd>
+            <dd className="text-[#1D1D21] self-center">
+              {draft && EDITABLE.has(v) ? (
+                <input aria-label={k} value={draft[v] ?? ''} onChange={(e) => setDraft({ ...draft, [v]: e.target.value })} className={inputCls + ' max-w-[360px] h-8'} />
+              ) : (
+                val || <span className="text-[#A0A0A8]">—</span>
+              )}
+            </dd>
           </div>
         ))}
       </dl>
@@ -326,20 +445,59 @@ function DevicesTab({ u }: { u: OktaUser }) {
 }
 
 function RolesTab({ u }: { u: OktaUser }) {
+  const { isAgent } = useDesk()
   const admin = u.groups.includes('okta-g-admins')
+  const roles: string[] = (u as any).adminRoles ?? []
+  const [editing, setEditing] = useState<string[] | null>(null)
   return (
     <div className="bg-white rounded-lg border border-[#E1E1E6]">
-      <div className="p-4 flex items-center"><div className="flex-1 text-[16px] font-semibold">Admin roles</div><Btn small label="Edit individual assignments">Edit individual assignments</Btn></div>
+      <div className="p-4 flex items-center"><div className="flex-1 text-[16px] font-semibold">Admin roles</div><Btn small agent="okta-roles-edit" label="Edit individual assignments" onClick={() => setEditing(roles)}>Edit individual assignments</Btn></div>
       <table className="w-full text-[14px]">
         <thead><tr className="text-left text-[12px] text-[#46464F] border-y border-[#E1E1E6] bg-[#FAFAFA]"><th className="px-4 py-2.5 font-semibold">Role</th><th className="px-3 py-2.5 font-semibold">Resource set</th><th className="px-3 py-2.5 font-semibold">Assigned via</th></tr></thead>
         <tbody>
-          {admin ? (
-            <tr><td className="px-4 py-3 font-semibold">Super Administrator</td><td className="px-3 py-3">All resources</td><td className="px-3 py-3">Group: Okta Super Admins</td></tr>
-          ) : (
+          {admin && <tr className="border-b border-[#EBEBED]"><td className="px-4 py-3 font-semibold">Super Administrator</td><td className="px-3 py-3">All resources</td><td className="px-3 py-3">Group: Okta Super Admins</td></tr>}
+          {roles.map((r) => (
+            <tr key={r} className="border-b border-[#EBEBED] last:border-0"><td className="px-4 py-3 font-semibold">{r}</td><td className="px-3 py-3">All resources</td><td className="px-3 py-3">Individual</td></tr>
+          ))}
+          {!admin && !roles.length && (
             <tr><td colSpan={3} className="px-4 py-8 text-center text-[#6E6E78]">{u.firstName} has no admin roles. Standard end-user access only.</td></tr>
           )}
         </tbody>
       </table>
+      {editing && (
+        <Modal
+          title={`Edit admin roles for ${fullName(u)}`}
+          onClose={() => setEditing(null)}
+          footer={
+            <>
+              <Btn label="Cancel" onClick={() => setEditing(null)}>Cancel</Btn>
+              <Btn
+                primary
+                label="Save changes"
+                onClick={() => {
+                  const added = editing.filter((r) => !roles.includes(r))
+                  const removed = roles.filter((r) => !editing.includes(r))
+                  db.update('okta.users', u.id, { adminRoles: editing, updatedBy: isAgent ? 'hworker' : 'alex', updatedAt: new Date().toISOString() })
+                  for (const r of added) addLog(isAgent, 'user.account.privilege.grant', 'User privilege granted', [userTarget(u), { type: 'Role', displayName: r, alternateId: r }])
+                  for (const r of removed) addLog(isAgent, 'user.account.privilege.revoke', 'User privilege revoked', [userTarget(u), { type: 'Role', displayName: r, alternateId: r }])
+                  setEditing(null)
+                }}
+              >
+                Save changes
+              </Btn>
+            </>
+          }
+        >
+          <div className="space-y-1">
+            {ADMIN_ROLES.filter((r) => r !== 'Super Administrator' || !admin).map((r) => (
+              <label key={r} className="flex items-center gap-3 px-2 h-9 rounded hover:bg-[#F4F4F4] cursor-pointer">
+                <input type="checkbox" checked={editing.includes(r)} onChange={(e) => setEditing(e.target.checked ? [...editing, r] : editing.filter((x) => x !== r))} className="w-4 h-4 accent-[#1662DD]" />
+                {r}
+              </label>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

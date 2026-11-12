@@ -77,6 +77,12 @@ export function OfficeTitleBar({
   saving,
   filenameButton,
   height = 40,
+  onUndo,
+  onRedo,
+  onSearch,
+  onCopilot,
+  onRibbonOptions,
+  onAccount,
 }: {
   app: 'word' | 'powerpoint'
   color: string
@@ -87,8 +93,16 @@ export function OfficeTitleBar({
   saving?: boolean
   filenameButton?: ReactNode
   height?: number
+  onUndo?: () => void
+  onRedo?: () => void
+  /** Enter in the title-bar search box */
+  onSearch?: (q: string) => void
+  onCopilot?: () => void
+  onRibbonOptions?: () => void
+  onAccount?: () => void
 }) {
   const [autoSave, setAutoSave] = useState(true)
+  const [q, setQ] = useState('')
   const btn = 'h-8 w-8 flex items-center justify-center rounded hover:bg-white/15'
   return (
     <div data-drag-handle className="shrink-0 flex items-center text-white select-none relative" style={{ background: color, height }}>
@@ -111,11 +125,11 @@ export function OfficeTitleBar({
         <button data-agent={saveAgentId} aria-label="Save" title="Save (Ctrl+S)" onClick={onSave} className={btn}>
           {saving ? <CloudCheckmark16Regular className="w-5 h-5" /> : <Save20Regular />}
         </button>
-        <button className={btn} aria-label="Undo" title="Undo (Ctrl+Z)">
+        <button className={btn} aria-label="Undo" title="Undo (Ctrl+Z)" onClick={onUndo}>
           <ArrowUndo20Regular />
         </button>
         <span className="opacity-80 -ml-1.5"><ChevronDown12Regular /></span>
-        <button className={btn} aria-label="Redo" title="Redo (Ctrl+Y)">
+        <button className={btn} aria-label="Redo" title="Redo (Ctrl+Y)" onClick={onRedo}>
           <ArrowRedo20Regular />
         </button>
         <button className="h-8 w-5 flex items-center justify-center rounded hover:bg-white/15" aria-label="Customize Quick Access Toolbar">
@@ -132,21 +146,36 @@ export function OfficeTitleBar({
       <div className="flex-1" />
       {/* centred search */}
       <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2" data-no-drag>
-        <div className="flex items-center gap-2 h-[30px] w-[min(420px,28vw)] rounded-[6px] bg-white/[0.18] hover:bg-white/25 px-2.5 text-[13px] text-white/90 border border-white/10">
+        <div className="flex items-center gap-2 h-[30px] w-[min(420px,28vw)] rounded-[6px] bg-white/[0.18] hover:bg-white/25 focus-within:bg-white focus-within:text-[#242424] px-2.5 text-[13px] text-white/90 border border-white/10">
           <Search16Regular className="shrink-0" />
-          <span className="truncate">Search</span>
-          <span className="ml-auto text-[11px] text-white/60">Alt+Q</span>
+          <input
+            aria-label="Search"
+            data-agent={`${app === 'word' ? 'word' : 'ppt'}-search`}
+            placeholder="Search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && q.trim()) {
+                onSearch?.(q.trim())
+                setQ('')
+                ;(e.target as HTMLInputElement).blur()
+              }
+              if (e.key === 'Escape') (setQ(''), (e.target as HTMLInputElement).blur())
+            }}
+            className="flex-1 min-w-0 bg-transparent outline-none placeholder:text-white/90 focus:placeholder:text-[#616161]"
+          />
+          <span className="ml-auto text-[11px] opacity-60">Alt+Q</span>
         </div>
       </div>
       <div className="flex items-center gap-1 pr-1" data-no-drag>
-        <button className="h-8 px-2 flex items-center gap-1.5 rounded hover:bg-white/15 text-[12px]" aria-label="Copilot">
+        <button className="h-8 px-2 flex items-center gap-1.5 rounded hover:bg-white/15 text-[12px]" aria-label="Copilot" onClick={onCopilot}>
           <span className="w-[22px] h-[22px] rounded-full bg-white flex items-center justify-center"><CopilotIcon size={16} /></span>
         </button>
-        <button className="h-8 flex items-center gap-2 px-1.5 rounded hover:bg-white/15 text-[12px]" aria-label="Account manager for Alex Morgan">
+        <button className="h-8 flex items-center gap-2 px-1.5 rounded hover:bg-white/15 text-[12px]" aria-label="Account manager for Alex Morgan" onClick={onAccount}>
           <span>{ME.name}</span>
           <Avatar id={ME.id} size={26} ring="rgba(255,255,255,0.55)" />
         </button>
-        <button className={btn} aria-label="Ribbon display options"><Settings20Regular /></button>
+        <button className={btn} aria-label="Ribbon display options" title="Ribbon display options" onClick={onRibbonOptions}><Settings20Regular /></button>
       </div>
       <WindowControls dark height={height} />
     </div>
@@ -204,7 +233,7 @@ export function RibbonTabs({
 export function Ribbon({ children }: { children: ReactNode }) {
   return (
     <div className="shrink-0 bg-[#F3F3F3] px-2 pb-2">
-      <div className="h-[104px] bg-white rounded-[8px] shadow-[0_0_2px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.14)] flex items-stretch px-1 overflow-hidden">
+      <div className="relative z-30 h-[104px] bg-white rounded-[8px] shadow-[0_0_2px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.14)] flex items-stretch px-1 overflow-x-clip overflow-y-visible">
         {children}
       </div>
     </div>
@@ -321,6 +350,28 @@ export function FakeSelect({ value, width, title }: { value: string; width: numb
   )
 }
 
+/** A real dropdown that looks like the ribbon's font / size boxes. */
+export function OfficeSelect({ value, width, title, options, onChange, agent }: { value: string; width: number; title: string; options: string[]; onChange: (v: string) => void; agent?: string }) {
+  return (
+    <select
+      title={title}
+      aria-label={title}
+      data-agent={agent}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-[24px] border border-[#D1D1D1] rounded-[4px] px-1 text-[12px] text-[#242424] bg-white hover:border-[#B3B3B3] outline-none"
+      style={{ width }}
+    >
+      {!options.includes(value) && <option value={value}>{value}</option>}
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 export function Sep() {
   return <span className="w-px h-5 bg-[#E0E0E0] mx-0.5 self-center" />
 }
@@ -334,6 +385,8 @@ export interface RecentItem {
   modified: string
   agentId: string
   hworker?: boolean
+  pinned?: boolean
+  shared?: boolean
 }
 
 export function Backstage({
@@ -346,6 +399,9 @@ export function Backstage({
   onBack,
   onOpen,
   canBack,
+  onCommand,
+  panes,
+  onPin,
 }: {
   app: 'word' | 'powerpoint'
   color: string
@@ -356,8 +412,17 @@ export function Backstage({
   onBack: () => void
   onOpen: (id: string) => void
   canBack: boolean
+  /** File-menu commands without a pane of their own (Save a Copy, Share, Close…) */
+  onCommand?: (label: string) => void
+  /** extra panes by nav label (Info, Print, Export, Account, Feedback, Options…) */
+  panes?: Partial<Record<string, ReactNode>>
+  onPin?: (id: string, pinned: boolean) => void
 }) {
-  const [pane, setPane] = useState<'home' | 'new' | 'open'>('home')
+  const [pane, setPane] = useState<string>('home')
+  const [tab, setTab] = useState(0)
+  const [q, setQ] = useState('')
+  const shown = recents.filter((r) => (tab === 1 ? r.pinned : tab === 2 ? r.shared : true)).filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
+  const go = (l: string) => (panes?.[l] ? setPane(l) : onCommand?.(l))
   const nav: [typeof pane | string, string, ReactNode][] = [
     ['home', 'Home', <Home24Regular />],
     ['new', 'New', <DocumentAdd24Regular />],
@@ -386,7 +451,7 @@ export function Backstage({
         ))}
         <div className="mx-6 my-3 h-px bg-white/25" />
         {['Info', 'Save a Copy', 'Print', 'Share', 'Export', 'Close'].map((l) => (
-          <button key={l} className="h-9 flex items-center gap-3 px-6 text-[13.5px] text-left hover:bg-white/10">
+          <button key={l} data-agent={`${app === 'word' ? 'word' : 'ppt'}-backstage-${l.toLowerCase().replace(/\s+/g, '-')}`} onClick={() => go(l)} className={`h-9 flex items-center gap-3 px-6 text-[13.5px] text-left ${pane === l ? 'bg-black/25' : 'hover:bg-white/10'}`}>
             {l === 'Info' && <Info24Regular className="w-5 h-5" />}
             {l === 'Print' && <Print24Regular className="w-5 h-5" />}
             {l === 'Share' && <Share20Regular />}
@@ -396,28 +461,42 @@ export function Backstage({
         ))}
         <div className="flex-1" />
         {['Account', 'Feedback', 'Options'].map((l) => (
-          <button key={l} className="h-9 flex items-center px-6 text-[13.5px] text-left hover:bg-white/10">
+          <button key={l} onClick={() => go(l)} className={`h-9 flex items-center px-6 text-[13.5px] text-left ${pane === l ? 'bg-black/25' : 'hover:bg-white/10'}`}>
             {l}
           </button>
         ))}
         <div className="h-3" />
       </div>
       <div className="flex-1 min-w-0 overflow-auto bg-white">
+        {panes?.[pane] ? (
+          <div className="px-12 pt-8 pb-10 max-w-[1100px]">
+            <div className="text-[28px] font-light text-[#242424] mb-5">{pane}</div>
+            {panes[pane]}
+          </div>
+        ) : (
         <div className="px-12 pt-8 pb-10 max-w-[1100px]">
           <div className="text-[28px] font-light text-[#242424] mb-5">{pane === 'open' ? 'Open' : pane === 'new' ? 'New' : greeting}</div>
           {pane !== 'open' && (
             <>
               <div className="flex gap-4 flex-wrap">{newTiles}</div>
               <div className="flex justify-end mt-2 text-[13px] pr-2" style={{ color }}>
-                More {app === 'word' ? 'templates' : 'themes'} →
+                <button onClick={() => setPane('new')} className="hover:underline">
+                  More {app === 'word' ? 'templates' : 'themes'} →
+                </button>
               </div>
             </>
           )}
+          {pane === 'open' && (
+            <div className="flex items-center gap-2 h-9 max-w-[560px] rounded-[6px] border border-[#D1D1D1] px-3 text-[13px] mb-2">
+              <Search16Regular className="text-[#616161]" />
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search files" className="flex-1 outline-none" />
+            </div>
+          )}
           <div className="mt-6 flex items-center gap-6 border-b border-[#E0E0E0] text-[14px]">
             {['Recent', 'Pinned', 'Shared with Me'].map((t, i) => (
-              <span key={t} className={`pb-2 ${i === 0 ? 'font-semibold border-b-2' : 'text-[#616161]'}`} style={i === 0 ? { borderColor: color } : undefined}>
+              <button key={t} onClick={() => setTab(i)} className={`pb-2 ${i === tab ? 'font-semibold border-b-2' : 'text-[#616161] hover:text-[#242424]'}`} style={i === tab ? { borderColor: color } : undefined}>
                 {t}
-              </span>
+              </button>
             ))}
           </div>
           <div className="grid grid-cols-[1fr_260px_160px] text-[12.5px] text-[#616161] px-3 py-2 border-b border-[#F0F0F0]">
@@ -425,7 +504,8 @@ export function Backstage({
             <span>Location</span>
             <span>Date modified</span>
           </div>
-          {recents.map((r) => (
+          {shown.length === 0 && <div className="px-3 py-8 text-[13px] text-[#616161]">{tab === 1 ? 'Pin files you want to easily find later. Hover over a file and click the pin icon.' : 'No files to show.'}</div>}
+          {shown.map((r) => (
             <button
               key={r.id}
               data-agent={r.agentId}
@@ -442,7 +522,18 @@ export function Backstage({
                   </span>
                   <span className="block text-[12px] text-[#616161] truncate">{r.location}</span>
                 </span>
-                <Pin16Regular className="ml-auto mr-4 text-[#616161] opacity-0 group-hover:opacity-100" />
+                <span
+                  role="button"
+                  aria-label={r.pinned ? 'Unpin' : 'Pin to list'}
+                  title={r.pinned ? 'Unpin' : 'Pin to list'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onPin?.(r.id, !r.pinned)
+                  }}
+                  className={`ml-auto mr-4 w-7 h-7 rounded flex items-center justify-center text-[#616161] hover:bg-[#E5E5E5] ${r.pinned ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                >
+                  <Pin16Regular />
+                </span>
               </span>
               <span className="text-[12.5px] text-[#616161] truncate">{r.location.split(' » ')[0]}</span>
               <span className="text-[12.5px] text-[#616161]">{fmtModified(r.modified)}</span>
@@ -450,6 +541,7 @@ export function Backstage({
           ))}
           <div className="text-[12px] text-[#616161] mt-6">{appName} · Microsoft 365 Apps for enterprise</div>
         </div>
+        )}
       </div>
     </div>
   )

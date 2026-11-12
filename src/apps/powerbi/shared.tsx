@@ -127,6 +127,10 @@ export interface PbiCtx {
   goHome: () => void
   notify: (n: Omit<Notice, 'id'>, ttl?: number) => string
   dismiss: (id: string) => void
+  /** navigate to a left-nav view (create, browse, onelake, metrics, monitor, learn, apps) */
+  navigate?: (view: string) => void
+  /** open the item settings dialog */
+  itemSettings?: (id: string) => void
 }
 export const PbiContext = createContext<PbiCtx>(null as any)
 export const usePbi = () => useContext(PbiContext)

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   Plane,
   DollarSign,
@@ -24,7 +24,7 @@ import { useCollection } from '@/db/db'
 import { ME, person } from '@/data/people'
 import { relative } from '@/data/time'
 import { Avatar } from '@/components/Avatar'
-import { Card, AppIcon } from './ui'
+import { Btn, Card, AppIcon, Modal } from './ui'
 import type { Nav, Route } from './index'
 import { fmtDays, fmtMDY } from './util'
 
@@ -51,6 +51,13 @@ export function Home({ nav }: { nav: Nav }) {
   const onb = useCollection<any>('workday.onboarding').find((o) => o.id === 'onb-jordan')
   const ann = useCollection<any>('workday.announcements')
   const today = new Date()
+  const [annOpen, setAnnOpen] = useState<any | null>(null)
+  const recommended: [ReactNode, string, string, string, Route][] = [
+    [<GraduationCap size={18} key="a" />, 'Leading Hybrid Teams', 'Course · 45 min', '#8660D9', { page: 'learning' }],
+    [<Briefcase size={18} key="b" />, 'Director, Operations — Chicago', 'Internal Job · Posted 3 days ago', '#005CB9', { page: 'career' }],
+    [<Clock size={18} key="c" />, 'Review Team Time Off for December', '3 requests pending in your team', '#0875E1', { page: 'team' }],
+    [<Gift size={18} key="d" />, 'Give Recognition', 'Thank Ben for the September SLA report', '#F38B00', { page: 'feedback' }],
+  ]
 
   return (
     <div className="min-h-full">
@@ -136,19 +143,14 @@ export function Home({ nav }: { nav: Nav }) {
 
           <Card title="Recommended for You">
             <div className="grid grid-cols-2 gap-3 px-6 pb-6">
-              {[
-                [<GraduationCap size={18} key="a" />, 'Leading Hybrid Teams', 'Course · 45 min', '#8660D9'],
-                [<Briefcase size={18} key="b" />, 'Director, Operations — Chicago', 'Internal Job · Posted 3 days ago', '#005CB9'],
-                [<Clock size={18} key="c" />, 'Review Team Time Off for December', '3 requests pending in your team', '#0875E1'],
-                [<Gift size={18} key="d" />, 'Give Recognition', 'Thank Ben for the September SLA report', '#F38B00'],
-              ].map(([i, t, s, c]) => (
-                <div key={t as string} className="flex items-center gap-3 p-3 rounded-xl border border-[#E8EBED] hover:bg-[#F6F7F8]">
-                  <AppIcon icon={i} color={c as string} size={36} />
+              {recommended.map(([i, t, s, c, r], idx) => (
+                <button key={t} data-agent={`workday-recommended-${idx}`} onClick={() => nav(r)} className="flex items-center gap-3 p-3 rounded-xl border border-[#E8EBED] hover:bg-[#F6F7F8] text-left">
+                  <AppIcon icon={i} color={c} size={36} />
                   <div className="min-w-0">
                     <div className="text-[14px] font-bold truncate">{t}</div>
                     <div className="text-[12.5px] text-[#5E6A75] truncate">{s}</div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </Card>
@@ -174,7 +176,7 @@ export function Home({ nav }: { nav: Nav }) {
           <Card title="Announcements">
             <div className="px-4 pb-4 space-y-3">
               {ann.map((a) => (
-                <div key={a.id} className="flex gap-3 p-2 rounded-xl hover:bg-[#F6F7F8]">
+                <button key={a.id} data-agent={`workday-announcement-${a.id}`} onClick={() => setAnnOpen(a)} className="w-full text-left flex gap-3 p-2 rounded-xl hover:bg-[#F6F7F8]">
                   <div
                     className="w-[84px] h-[64px] rounded-lg shrink-0 flex items-center justify-center text-white"
                     style={{ background: a.tone === 'blue' ? 'linear-gradient(135deg,#0875E1,#5FA9F2)' : a.tone === 'orange' ? 'linear-gradient(135deg,#F38B00,#FFC56B)' : 'linear-gradient(135deg,#00A3A3,#6FD3CE)' }}
@@ -185,7 +187,7 @@ export function Home({ nav }: { nav: Nav }) {
                     <div className="text-[14px] font-bold leading-snug">{a.title}</div>
                     <div className="text-[12.5px] text-[#5E6A75] leading-snug mt-0.5 line-clamp-2">{a.body}</div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </Card>
@@ -197,14 +199,14 @@ export function Home({ nav }: { nav: Nav }) {
                 ['maya', 'Vacation · Oct 5 – Oct 6', 'Approved'],
                 ['priya', 'Vacation · Dec 28 – Jan 1', 'Approved'],
               ].map(([id, t, s]) => (
-                <div key={id} className="flex items-center gap-3">
+                <button key={id} onClick={() => nav({ page: 'worker', workerId: `wd-${id}`, tab: 'timeoff' })} className="w-full text-left flex items-center gap-3 rounded-xl hover:bg-[#F6F7F8] -mx-2 px-2 py-1">
                   <Avatar id={id} size={32} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[14px] font-medium">{person(id).name}</div>
                     <div className="text-[12.5px] text-[#5E6A75]">{t}</div>
                   </div>
                   <span className={`text-[12px] font-bold ${s === 'Pending' ? 'text-[#9C4F00]' : 'text-[#1E6F34]'}`}>{s}</span>
-                </div>
+                </button>
               ))}
               <button onClick={() => nav({ page: 'team' })} className="text-[14px] font-bold text-[#0875E1] hover:underline flex items-center gap-1 pt-1">
                 <CalendarDays size={16} /> View Team Calendar
@@ -213,8 +215,34 @@ export function Home({ nav }: { nav: Nav }) {
           </Card>
         </div>
       </div>
+      {annOpen && (
+        <Modal
+          title={annOpen.title}
+          onClose={() => setAnnOpen(null)}
+          footer={
+            <>
+              <Btn variant="primary" onClick={() => setAnnOpen(null)}>
+                Close
+              </Btn>
+              {annOpen.tone === 'blue' && (
+                <Btn onClick={() => (setAnnOpen(null), nav({ page: 'benefits' }))}>Review Benefits</Btn>
+              )}
+            </>
+          }
+        >
+          <div className="text-[13px] text-[#5E6A75] mb-3">Posted {annOpen.date ? relative(annOpen.date) : ''} · Northwind Communications</div>
+          <div className="text-[15px] leading-relaxed">{annOpen.body}</div>
+          <div className="text-[14px] leading-relaxed text-[#5E6A75] mt-3">{ANN_MORE[annOpen.tone] ?? ''}</div>
+        </Modal>
+      )}
     </div>
   )
+}
+
+const ANN_MORE: Record<string, string> = {
+  blue: 'New for 2027: the Aetna HDHP now includes a $750 company HSA seed, and Delta Dental raises the annual maximum to $2,000. If you take no action, your current elections roll over (except HSA and FSA contributions).',
+  orange: 'One Federal has 22 neighborhoods with bookable desks, 14 focus rooms and a wellness room on every floor. Badge access is activated automatically for Boston-based workers.',
+  teal: 'Submit questions in advance via the Q4 Town Hall form. The session will be recorded and posted to the Northwind intranet within 24 hours.',
 }
 
 function Suggestion({ icon, color, title, body, cta, onClick, agent }: { icon: ReactNode; color: string; title: string; body: string; cta: string; onClick: () => void; agent?: string }) {

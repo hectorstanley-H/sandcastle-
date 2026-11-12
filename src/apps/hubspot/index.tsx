@@ -22,21 +22,26 @@ import { CallsPage, MeetingsPage } from './Engagements'
 import { GoalsPage, PropertiesPage } from './Data'
 import { db } from '@/db/db'
 import { hsDate } from './ui'
+import { ExtraPage, KINDS } from './Extras'
+import { AccountMenu, CopilotPanel, HelpMenu, MarketplaceModal, SettingsPage, UpgradeModal } from './TopBar'
+import { Dialer } from './Engagements'
 
 const NAV: { id: string; icon: any; label: string; items?: [string, HRoute | null][] }[] = [
   { id: 'bookmarks', icon: Bookmark, label: 'Bookmarks', items: [['Contacts', { page: 'contacts' }], ['Inbox', { page: 'inbox' }], ['Lists', { page: 'lists' }], ['Sequences', { page: 'sequences' }], ['Quotes', { page: 'quotes' }]] },
   { id: 'crm', icon: Users, label: 'CRM', items: [['Contacts', { page: 'contacts' }], ['Companies', { page: 'companies' }], ['Deals', { page: 'deals' }], ['Tickets', { page: 'tickets' }], ['Lists', { page: 'lists' }], ['Inbox', { page: 'inbox' }], ['Calls', { page: 'calls' }], ['Tasks', { page: 'tasks' }]] },
-  { id: 'marketing', icon: Megaphone, label: 'Marketing', items: [['Campaigns', null], ['Email', { page: 'emails' }], ['Social', null], ['Ads', null], ['Events', null], ['Forms', { page: 'forms' }], ['Lists', { page: 'lists' }], ['Lead Scoring', null]] },
-  { id: 'content', icon: FileEdit, label: 'Content', items: [['Website Pages', null], ['Landing Pages', null], ['Blog', null], ['Videos', null]] },
-  { id: 'sales', icon: TrendingUp, label: 'Sales', items: [['Sales Workspace', { page: 'home' }], ['Deals', { page: 'deals' }], ['Sequences', { page: 'sequences' }], ['Meetings', { page: 'meetings' }], ['Calls', { page: 'calls' }], ['Quotes', { page: 'quotes' }], ['Forecast', { page: 'reports', tab: 'Forecast' }], ['Playbooks', null]] },
-  { id: 'commerce', icon: ShoppingCart, label: 'Commerce', items: [['Quotes', { page: 'quotes' }], ['Products', { page: 'products' }], ['Payments', null], ['Invoices', null]] },
+  { id: 'marketing', icon: Megaphone, label: 'Marketing', items: [['Campaigns', { page: 'extra', kind: 'campaigns' }], ['Email', { page: 'emails' }], ['Social', { page: 'extra', kind: 'social' }], ['Ads', { page: 'extra', kind: 'ads' }], ['Events', { page: 'extra', kind: 'events' }], ['Forms', { page: 'forms' }], ['Lists', { page: 'lists' }], ['Lead Scoring', { page: 'extra', kind: 'leadScoring' }]] },
+  { id: 'content', icon: FileEdit, label: 'Content', items: [['Website Pages', { page: 'extra', kind: 'websitePages' }], ['Landing Pages', { page: 'extra', kind: 'landingPages' }], ['Blog', { page: 'extra', kind: 'blog' }], ['Videos', { page: 'extra', kind: 'videos' }]] },
+  { id: 'sales', icon: TrendingUp, label: 'Sales', items: [['Sales Workspace', { page: 'home' }], ['Deals', { page: 'deals' }], ['Sequences', { page: 'sequences' }], ['Meetings', { page: 'meetings' }], ['Calls', { page: 'calls' }], ['Quotes', { page: 'quotes' }], ['Forecast', { page: 'reports', tab: 'Forecast' }], ['Playbooks', { page: 'extra', kind: 'playbooks' }]] },
+  { id: 'commerce', icon: ShoppingCart, label: 'Commerce', items: [['Quotes', { page: 'quotes' }], ['Products', { page: 'products' }], ['Payments', { page: 'extra', kind: 'payments' }], ['Invoices', { page: 'extra', kind: 'invoices' }]] },
   { id: 'service', icon: Headset, label: 'Service', items: [['Help Desk', { page: 'tickets' }], ['Inbox', { page: 'inbox' }], ['Tickets', { page: 'tickets' }], ['Knowledge Base', { page: 'kb' }]] },
-  { id: 'data', icon: Database, label: 'Data Management', items: [['Data Model', null], ['Properties', { page: 'properties' }], ['Data Quality', null]] },
-  { id: 'automation', icon: Workflow, label: 'Automation', items: [['Workflows', { page: 'workflows' }], ['Sequences', { page: 'sequences' }], ['Chatflows', null]] },
+  { id: 'data', icon: Database, label: 'Data Management', items: [['Data Model', { page: 'extra', kind: 'dataModel' }], ['Properties', { page: 'properties' }], ['Data Quality', { page: 'extra', kind: 'dataQuality' }]] },
+  { id: 'automation', icon: Workflow, label: 'Automation', items: [['Workflows', { page: 'workflows' }], ['Sequences', { page: 'sequences' }], ['Chatflows', { page: 'extra', kind: 'chatflows' }]] },
   { id: 'reporting', icon: ChartColumn, label: 'Reporting', items: [['Dashboards', { page: 'home' }], ['Reports', { page: 'reports', tab: 'Pipeline' }], ['Goals', { page: 'goals' }]] },
 ]
 
 const H = 'https://app.hubspot.com'
+const EXTRA_URL: Record<string, string> = { campaigns: 'marketing/campaigns', social: 'social', ads: 'ads', events: 'marketing-events', leadScoring: 'lead-scoring', websitePages: 'website/pages', landingPages: 'pages/landing', blog: 'blog/posts', videos: 'video-hosting', playbooks: 'playbooks', payments: 'payments', invoices: 'invoices', dataModel: 'data-model-overview', dataQuality: 'data-quality', chatflows: 'chatflows' }
+const EXTRA_TITLE: Record<string, string> = { leadScoring: 'Lead Scoring', dataModel: 'Data Model', dataQuality: 'Data Quality' }
 const urlFor = (r: HRoute) => {
   switch (r.page) {
     case 'contacts': return [`${H}/contacts/${PORTAL}/objects/0-1/views/all/list`, 'Contacts | HubSpot']
@@ -71,7 +76,10 @@ const urlFor = (r: HRoute) => {
     case 'kb-article': return [`${H}/knowledge/${PORTAL}/edit/${r.id}`, 'Knowledge article | HubSpot']
     case 'goals': return [`${H}/goals/${PORTAL}`, 'Goals | HubSpot']
     case 'properties': return [`${H}/property-settings/${PORTAL}/properties`, 'Properties | HubSpot']
+    case 'extra': return [`${H}/${EXTRA_URL[r.kind] ?? r.kind}/${PORTAL}`, `${KINDS[r.kind]?.title ?? EXTRA_TITLE[r.kind] ?? 'HubSpot'} | HubSpot`]
+    case 'settings': return [`${H}/settings/${PORTAL}/account-defaults/general`, 'Settings | HubSpot']
   }
+  return [`${H}/contacts/${PORTAL}`, 'HubSpot']
 }
 
 export default function HubSpot({ win, params }: AppProps) {
@@ -80,6 +88,8 @@ export default function HubSpot({ win, params }: AppProps) {
   const [fly, setFly] = useState<string | null>(null)
   const [modal, setModal] = useState<ReactNode | null>(null)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
+  const [menu, setMenu] = useState<null | 'help' | 'account'>(null)
+  const [copilot, setCopilot] = useState(false)
 
   useEffect(() => {
     if (!params) return
@@ -125,8 +135,8 @@ export default function HubSpot({ win, params }: AppProps) {
             </button>
           ))}
           <div className="flex-1" />
-          <button className="w-10 h-10 flex items-center justify-center text-[#CBD6E2]" aria-label="Marketplace"><LayoutGrid size={18} /></button>
-          <button className="w-10 h-10 flex items-center justify-center text-[#CBD6E2]" aria-label="Settings"><Settings size={18} /></button>
+          <button data-agent="hs-rail-marketplace" onClick={() => setModal(<MarketplaceModal onClose={() => setModal(null)} />)} className="w-10 h-10 flex items-center justify-center text-[#CBD6E2] hover:text-white" aria-label="Marketplace"><LayoutGrid size={18} /></button>
+          <button data-agent="hs-rail-settings" onClick={() => go({ page: 'settings' })} className="w-10 h-10 flex items-center justify-center text-[#CBD6E2] hover:text-white" aria-label="Settings"><Settings size={18} /></button>
         </div>
         {flyItem && (
           <div className="absolute left-[56px] top-0 bottom-0 w-[240px] bg-[#2D3E50] text-white z-30 py-4 shadow-[4px_0_12px_rgba(0,0,0,0.2)]">
@@ -146,17 +156,23 @@ export default function HubSpot({ win, params }: AppProps) {
           <div className="h-12 shrink-0 bg-[#213343] flex items-center px-4 gap-3 text-white">
             <GlobalSearch go={go} />
             <div className="flex-1" />
-            <button className="text-[13px] font-semibold text-[#FF8F73] mr-2">Upgrade</button>
-            {[Phone, LayoutGrid, CircleHelp, Settings].map((I, i) => (
-              <button key={i} className="w-8 h-8 rounded flex items-center justify-center text-[#EAF0F6] hover:bg-[#2D3E50]"><I size={17} /></button>
+            <button data-agent="hs-upgrade" onClick={() => setModal(<UpgradeModal onClose={() => setModal(null)} />)} className="text-[13px] font-semibold text-[#FF8F73] mr-2">Upgrade</button>
+            {([[Phone, 'Calling', 'hs-top-calling', () => setModal(<Dialer onClose={() => setModal(null)} />)], [LayoutGrid, 'Marketplace', 'hs-top-marketplace', () => setModal(<MarketplaceModal onClose={() => setModal(null)} />)], [CircleHelp, 'Help', 'hs-top-help', () => setMenu(menu === 'help' ? null : 'help')], [Settings, 'Settings', 'hs-top-settings', () => go({ page: 'settings' })]] as [any, string, string, () => void][]).map(([I, l, a, fn]) => (
+              <div key={a} className="relative">
+                <button data-agent={a} aria-label={l} title={l} onClick={fn} className={`w-8 h-8 rounded flex items-center justify-center text-[#EAF0F6] hover:bg-[#2D3E50] ${(a === 'hs-top-help' && menu === 'help') ? 'bg-[#2D3E50]' : ''}`}><I size={17} /></button>
+                {a === 'hs-top-help' && menu === 'help' && <HelpMenu onClose={() => setMenu(null)} />}
+              </div>
             ))}
             <Notifications go={go} />
-            <button className="flex items-center gap-1 h-8 px-2 rounded-full bg-[#2D3E50] text-[13px] font-semibold"><Sparkles size={15} className="text-[#FF8F73]" /> Copilot</button>
-            <button className="flex items-center gap-2 pl-2 text-[13px]">
-              <Avatar id={ME.id} size={28} />
-              <span>Northwind Global</span>
-              <ChevronDown size={14} />
-            </button>
+            <button data-agent="hs-copilot" onClick={() => setCopilot(!copilot)} className={`flex items-center gap-1 h-8 px-2 rounded-full text-[13px] font-semibold ${copilot ? 'bg-[#425B76]' : 'bg-[#2D3E50]'}`}><Sparkles size={15} className="text-[#FF8F73]" /> Copilot</button>
+            <div className="relative">
+              <button data-agent="hs-account" aria-label="Account menu" onClick={() => setMenu(menu === 'account' ? null : 'account')} className="flex items-center gap-2 pl-2 text-[13px]">
+                <Avatar id={ME.id} size={28} />
+                <span>Northwind Global</span>
+                <ChevronDown size={14} />
+              </button>
+              {menu === 'account' && <AccountMenu onClose={() => setMenu(null)} />}
+            </div>
           </div>
           <div className="flex-1 min-h-0 overflow-auto bg-[#F5F8FA]">
             {route.page === 'contacts' && <ObjectIndex key="c" object="contacts" />}
@@ -191,8 +207,11 @@ export default function HubSpot({ win, params }: AppProps) {
             {route.page === 'kb-article' && <KbArticle key={route.id} id={route.id} />}
             {route.page === 'goals' && <GoalsPage />}
             {route.page === 'properties' && <PropertiesPage />}
+            {route.page === 'extra' && <ExtraPage key={route.kind} kind={route.kind} />}
+            {route.page === 'settings' && <SettingsPage key={route.tab ?? 's'} tab={route.tab} />}
           </div>
         </div>
+        {copilot && <CopilotPanel onClose={() => setCopilot(false)} />}
       </div>
     </HNav.Provider>
   )

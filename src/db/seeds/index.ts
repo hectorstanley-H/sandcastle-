@@ -12,10 +12,11 @@ import { seed as sales } from './sales'
 import { seed as hubspot } from './hubspot'
 import { seed as it } from './it'
 import { seed as system } from './system'
+import { seed as extras } from './extras'
 
 export function buildSeed(): Collections {
   const out: Collections = {}
-  for (const part of [core(), m365(), finance(), hr(), sales(), hubspot(), it(), system()]) {
+  for (const part of [core(), m365(), finance(), hr(), sales(), hubspot(), it(), system(), extras()]) {
     for (const [k, v] of Object.entries(part)) out[k] = out[k] ? [...out[k], ...v] : v
   }
   return out

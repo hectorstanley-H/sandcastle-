@@ -4,7 +4,7 @@ import { db, useCollection } from '@/db/db'
 import { ME, person } from '@/data/people'
 import { relative } from '@/data/time'
 import { Avatar } from '@/components/Avatar'
-import { Btn, HWorkerChip, Pill } from './ui'
+import { Btn, HWorkerChip, Menu, Pill, textareaCls } from './ui'
 import type { Nav } from './index'
 import { fmtDays, fmtMDY } from './util'
 
@@ -20,7 +20,14 @@ const ICON: Record<string, any> = {
 export function InboxPage({ nav, initialTask }: { nav: Nav; initialTask?: string }) {
   const all = useCollection<any>('workday.tasks').filter((t) => t.assignee === ME.id)
   const [tab, setTab] = useState<'open' | 'done'>('open')
-  const list = all.filter((t) => t.status === tab).sort((a, b) => +new Date(b.receivedAt) - +new Date(a.receivedAt))
+  const [proc, setProc] = useState('All Items')
+  const [sort, setSort] = useState<'Newest' | 'Oldest' | 'Due Date'>('Newest')
+  const [menu, setMenu] = useState<null | 'filter' | 'sort'>(null)
+  const [comment, setComment] = useState('')
+  const processes = Array.from(new Set(all.filter((t) => t.status === tab).map((t) => t.process as string))).sort()
+  const list = all
+    .filter((t) => t.status === tab && (proc === 'All Items' || t.process === proc))
+    .sort((a, b) => (sort === 'Oldest' ? +new Date(a.receivedAt) - +new Date(b.receivedAt) : sort === 'Due Date' ? +new Date(a.due ?? '2999-01-01') - +new Date(b.due ?? '2999-01-01') : +new Date(b.receivedAt) - +new Date(a.receivedAt)))
   const [sel, setSel] = useState<string | undefined>(initialTask)
   useEffect(() => {
     if (initialTask) setSel(initialTask)
@@ -28,10 +35,23 @@ export function InboxPage({ nav, initialTask }: { nav: Nav; initialTask?: string
   const cur = all.find((t) => t.id === sel) ?? list[0]
   const timeoff = cur?.link?.requestId ? db.find<any>('workday.timeoff', cur.link.requestId) : null
 
+  useEffect(() => setComment(''), [cur?.id])
+
   const complete = (verb: string) => {
     if (!cur) return
-    db.update('workday.tasks', cur.id, { status: 'done', completedAt: new Date().toISOString(), outcome: verb })
+    db.update('workday.tasks', cur.id, { status: 'done', completedAt: new Date().toISOString(), outcome: verb, ...(comment.trim() ? { comment: comment.trim() } : {}) })
     if (timeoff && verb === 'Approved') db.update('workday.timeoff', timeoff.id, { status: 'Approved' })
+    if (timeoff && (verb === 'Denied' || verb === 'Sent Back') && timeoff.status === 'Submitted') {
+      // returning the request gives the hours back to the worker's balance
+      const key = ({ Vacation: 'vacation', Sick: 'sick', 'Floating Holiday': 'floating' } as Record<string, string>)[timeoff.type]
+      db.update('workday.timeoff', timeoff.id, { status: verb, decidedAt: new Date().toISOString(), decisionComment: comment.trim() || undefined })
+      if (key) db.update('workday.workers', timeoff.workerId, (w) => ({ balances: { ...w.balances, [key]: Math.round(((w.balances?.[key] ?? 0) + timeoff.totalDays) * 10) / 10 } }))
+    }
+    if (cur.process === 'Expense Report') {
+      const exp = cur.link?.expenseId ? db.find<any>('workday.expenses', cur.link.expenseId) : db.get<any>('workday.expenses').find((e) => cur.title.includes(e.number))
+      if (exp) db.update('workday.expenses', exp.id, { status: verb === 'Approved' ? 'Approved' : verb })
+    }
+    if (cur.process === 'Create Job Requisition' && cur.link?.reqId) db.update('workday.requisitions', cur.link.reqId, { status: verb === 'Approved' ? 'Approved' : verb })
     setSel(undefined)
   }
 
@@ -52,12 +72,18 @@ export function InboxPage({ nav, initialTask }: { nav: Nav; initialTask?: string
             ))}
           </div>
           <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#F0F1F2]">
-            <button className="h-8 px-3 rounded-full border border-[#A1AAB3] text-[13px] font-bold flex items-center gap-1.5">
-              <Filter size={14} /> All Items
-            </button>
-            <button className="h-8 px-3 rounded-full border border-[#A1AAB3] text-[13px] font-bold flex items-center gap-1.5">
-              <ArrowUpDown size={14} /> Newest
-            </button>
+            <div className="relative">
+              <button data-agent="workday-inbox-filter" onClick={() => setMenu(menu === 'filter' ? null : 'filter')} className={`h-8 px-3 rounded-full border text-[13px] font-bold flex items-center gap-1.5 ${proc !== 'All Items' ? 'border-[#0875E1] bg-[#D7EAFC] text-[#005CB9]' : 'border-[#A1AAB3]'}`}>
+                <Filter size={14} /> {proc}
+              </button>
+              {menu === 'filter' && <Menu items={['All Items', ...processes].map((p) => ({ label: p, onClick: () => setProc(p) }))} onClose={() => setMenu(null)} className="top-9 left-0" />}
+            </div>
+            <div className="relative">
+              <button data-agent="workday-inbox-sort" onClick={() => setMenu(menu === 'sort' ? null : 'sort')} className="h-8 px-3 rounded-full border border-[#A1AAB3] text-[13px] font-bold flex items-center gap-1.5">
+                <ArrowUpDown size={14} /> {sort}
+              </button>
+              {menu === 'sort' && <Menu items={(['Newest', 'Oldest', 'Due Date'] as const).map((p) => ({ label: p, onClick: () => setSort(p) }))} onClose={() => setMenu(null)} className="top-9 left-0" />}
+            </div>
           </div>
           <div className="flex-1 overflow-auto">
             {list.map((t) => {
@@ -106,8 +132,22 @@ export function InboxPage({ nav, initialTask }: { nav: Nav; initialTask?: string
                     {timeoff.comment && <div className="text-[#5E6A75]">“{timeoff.comment}”</div>}
                   </div>
                 )}
-                {cur.process === 'Expense Report' && <div>Client dinner and mileage — Chicago site visit. 3 expense lines, all within policy.</div>}
+                {cur.process === 'Expense Report' && <div>{expenseText(cur)}</div>}
+                {cur.process === 'Request Compensation Change' && <div>Compensation change proposed by {person(cur.fromId).name}. Review the worker’s Compensation tab before approving.</div>}
+                {cur.process === 'Create Job Requisition' && <div>New requisition for the Operations supervisory organization. Approving releases it to Recruiting for posting in Greenhouse.</div>}
+                {cur.process === 'Performance Review' && <div>Complete the manager evaluation for the 2026 Mid-Year Review on Team Performance, or open the task to mark it complete.</div>}
+                {cur.comment && (
+                  <div className="text-[#5E6A75]">
+                    Comment: <span className="text-[#333]">“{cur.comment}”</span>
+                  </div>
+                )}
               </div>
+              {cur.status === 'open' && cur.process !== 'Hire Employee' && (
+                <div className="mt-4">
+                  <div className="text-[13.5px] font-medium mb-1.5">Comment</div>
+                  <textarea aria-label="Comment for this task" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Optional — visible to the initiator" className={textareaCls + ' h-20'} />
+                </div>
+              )}
               {cur.status === 'open' && (
                 <div className="flex gap-3 mt-6">
                   {cur.process === 'Hire Employee' ? (
@@ -119,13 +159,18 @@ export function InboxPage({ nav, initialTask }: { nav: Nav; initialTask?: string
                       <Btn variant="primary" agent="workday-inbox-approve" onClick={() => complete('Approved')}>
                         Approve
                       </Btn>
-                      <Btn onClick={() => complete('Sent Back')}>Send Back</Btn>
-                      <Btn onClick={() => complete('Denied')}>Deny</Btn>
+                      <Btn agent="workday-inbox-sendback" onClick={() => complete('Sent Back')}>Send Back</Btn>
+                      <Btn agent="workday-inbox-deny" onClick={() => complete('Denied')}>Deny</Btn>
                     </>
                   ) : (
-                    <Btn variant="primary" onClick={() => (cur.process === 'Benefit Change' ? nav({ page: 'benefits' }) : complete('Completed'))}>
-                      Open Task
-                    </Btn>
+                    <>
+                      <Btn variant="primary" onClick={() => (cur.process === 'Benefit Change' ? nav({ page: 'benefits' }) : complete('Completed'))}>
+                        Open Task
+                      </Btn>
+                      {cur.process === 'Required Learning' && <Btn onClick={() => nav({ page: 'learning' })}>Go to Learning</Btn>}
+                      {cur.process === 'Performance Review' && <Btn onClick={() => nav({ page: 'performance' })}>Go to Team Performance</Btn>}
+                      {cur.process === 'Request Compensation Change' && cur.link?.workerId && <Btn onClick={() => nav({ page: 'worker', workerId: cur.link.workerId, tab: 'compensation' })}>View Worker</Btn>}
+                    </>
                   )}
                 </div>
               )}
@@ -142,4 +187,10 @@ export function InboxPage({ nav, initialTask }: { nav: Nav; initialTask?: string
       </div>
     </div>
   )
+}
+
+function expenseText(t: any) {
+  const e = t.link?.expenseId ? db.find<any>('workday.expenses', t.link.expenseId) : db.get<any>('workday.expenses').find((x) => t.title.includes(x.number))
+  if (!e) return 'Client dinner and mileage — Chicago site visit. 3 expense lines, all within policy.'
+  return `${e.memo} — ${e.lines?.length ?? 0} expense line${e.lines?.length === 1 ? '' : 's'}: ${(e.lines ?? []).map((l: any) => `${l.category} at ${l.merchant} ($${Number(l.amount).toFixed(2)})`).join(', ')}.`
 }

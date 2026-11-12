@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, ChevronDown, CircleHelp, Cloud, Pencil, Plus, Search, Settings, Star, X } from 'lucide-react'
+import { ChevronDown, Pencil, Search, X } from 'lucide-react'
 import type { AppProps } from '@/os/registry'
 import { logoUrl } from '@/os/registry'
 import { useWin } from '@/os/context'
 import { useCollection } from '@/db/db'
-import { Avatar } from '@/components/Avatar'
-import { ME } from '@/data/people'
-import { NavCtx, OBJ, ObjIcon, useNav as useNavLocal, type Route } from './ui'
+import { NavCtx, OBJ, ObjIcon, useNav as useNavLocal, type MenuItem, type Route } from './ui'
+import { ActionHost, ActionsCtx, type ActionReq } from './forms'
+import { ToastView, useToast } from './record'
+import { AppLauncher, EXTRA_NAV, EditNav, Favorites, GlobalActions, Guidance, Help, Notifications, Profile, SetupMenu } from './Header'
 import { Home } from './Home'
 import { ListView } from './ListView'
 import { OpportunityPage } from './Opportunity'
-import { AccountPage, ContactPage, LeadPage } from './Records'
-import { SearchResults, ReportsPage, DashboardsPage, ForecastsPage, ChatterPage, FilesPage } from './Other'
+import { AccountPage, CasePage, ContactPage, LeadPage } from './Records'
+import { SearchResults, ReportsPage, ReportRun, DashboardsPage, ForecastsPage, ChatterPage, FilesPage, SetupPage } from './Other'
 
 const TABS: [string, string][] = [
   ['Home', 'Home'],
@@ -48,6 +49,7 @@ function GlobalSearch() {
   const accts = useCollection<any>('salesforce.accounts')
   const contacts = useCollection<any>('salesforce.contacts')
   const leads = useCollection<any>('salesforce.leads')
+  const cases = useCollection<any>('salesforce.cases')
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -68,8 +70,9 @@ function GlobalSearch() {
       ...accts.filter((a) => a.name.toLowerCase().includes(s)).map((a) => ({ id: a.id, object: 'Account', name: a.name, sub: `Account • ${a.city}` })),
       ...contacts.filter((c) => (c.name + ' ' + c.email).toLowerCase().includes(s)).map((c) => ({ id: c.id, object: 'Contact', name: c.name, sub: `Contact • ${acctName(c.accountId)} • ${c.title}` })),
       ...leads.filter((l) => (l.name + ' ' + l.company).toLowerCase().includes(s)).map((l) => ({ id: l.id, object: 'Lead', name: l.name, sub: `Lead • ${l.company}` })),
+      ...cases.filter((c) => (c.caseNumber + ' ' + c.subject).toLowerCase().includes(s)).map((c) => ({ id: c.id, object: 'Case', name: `${c.caseNumber} — ${c.subject}`, sub: `Case • ${c.status}` })),
     ].slice(0, 8)
-  }, [q, opps, accts, contacts, leads])
+  }, [q, opps, accts, contacts, leads, cases])
   const recent = opps.filter((o) => o.ownerId === 'alex').slice(0, 5)
 
   return (
@@ -156,7 +159,17 @@ export default function Salesforce({ win, params }: AppProps) {
   const accts = useCollection<any>('salesforce.accounts')
   const contacts = useCollection<any>('salesforce.contacts')
   const leads = useCollection<any>('salesforce.leads')
+  const cases = useCollection<any>('salesforce.cases')
+  const prefs = useCollection<any>('salesforce.prefs')
   const scroller = useRef<HTMLDivElement>(null)
+  const [action, setAction] = useState<ActionReq | null>(null)
+  const { toast, show, hide } = useToast()
+  const [launcher, setLauncher] = useState(false)
+  const [editNav, setEditNav] = useState(false)
+  const [navMenu, setNavMenu] = useState<{ obj: string; left: number } | null>(null)
+  const [recent, setRecent] = useState<{ object: string; id: string }[]>([])
+  const extraNav = (prefs.find((p) => p.id === 'navExtra')?.items ?? []) as string[]
+  const tabs: [string, string][] = [...TABS, ...EXTRA_NAV.filter(([k]) => extraNav.includes(k))]
 
   useEffect(() => {
     if (!params) return
@@ -178,20 +191,41 @@ export default function Salesforce({ win, params }: AppProps) {
       setUrl(isObj ? `${HOST}/lightning/o/${r.object}/list?filterName=${r.object === 'Opportunity' ? 'AllOpportunities' : 'Recent'}` : `${HOST}/lightning/${r.object === 'Chatter' ? 'page/chatter' : r.object === 'Forecasts' ? 'n/standard-Forecasting3' : `o/${r.object}/home`}`)
       setTitle(`${r.object === 'Opportunity' ? 'All Opportunities' : 'Recently Viewed'} | ${o?.plural ?? r.object} | Salesforce`)
     } else if (r.page === 'record') {
-      const rec = [...opps, ...accts, ...contacts, ...leads].find((x) => x.id === r.id)
+      const rec = [...opps, ...accts, ...contacts, ...leads, ...cases].find((x) => x.id === r.id)
+      setRecent((l) => [{ object: r.object, id: r.id }, ...l.filter((x) => x.id !== r.id)].slice(0, 12))
       setUrl(`${HOST}/lightning/r/${r.object}/${r.id}/view`)
       setTitle(`${rec?.name ?? r.object} | ${OBJ[r.object]?.label ?? r.object} | Salesforce`)
     } else if (r.page === 'search') {
-      setUrl(`${HOST}/one/one.app#${btoa(JSON.stringify({ componentDef: 'forceSearch:searchPageDesktop', attributes: { term: r.q } })).slice(0, 64)}`)
+      setUrl(`${HOST}/one/one.app#${btoa(unescape(encodeURIComponent(JSON.stringify({ componentDef: 'forceSearch:searchPageDesktop', attributes: { term: r.q } })))).slice(0, 64)}`)
       setTitle(`Search Results | Salesforce`)
+    } else if (r.page === 'report') {
+      setUrl(`${HOST}/lightning/r/Report/${r.id}/view`)
+      setTitle('Report | Salesforce')
+    } else if (r.page === 'setup') {
+      setUrl(`${HOST}/lightning/setup/${r.tab === 'users' ? 'ManageUsers' : r.tab === 'objects' ? 'ObjectManager' : r.tab === 'company' ? 'CompanyProfileInfo' : 'SetupOneHome'}/home`)
+      setTitle('Setup | Salesforce')
     }
   }, [route, win.id, win.url === undefined])
 
-  const activeTab = route.page === 'home' ? 'Home' : route.page === 'list' || route.page === 'record' ? route.object : ''
+  const activeTab = route.page === 'home' ? 'Home' : route.page === 'list' || route.page === 'record' ? route.object : route.page === 'report' ? 'Report' : route.page === 'setup' ? 'Setup' : ''
+  const recName = (x: { object: string; id: string }) => {
+    const r = [...opps, ...accts, ...contacts, ...leads, ...cases].find((y) => y.id === x.id)
+    return r ? r.name ?? `${r.caseNumber} — ${r.subject}` : null
+  }
+  const navItems = (obj: string, label: string) => {
+    const canNew = ['Opportunity', 'Lead', 'Task', 'Account', 'Contact', 'Campaign', 'Case'].includes(obj)
+    const rec = recent.filter((x) => x.object === obj).map((x) => ({ ...x, name: recName(x) })).filter((x) => x.name).slice(0, 5)
+    return [
+      ...(canNew ? [{ label: `New ${OBJ[obj]?.label ?? obj}`, icon: <span className="w-[18px] text-center text-[#0176D3] font-bold">+</span>, onClick: () => setAction({ kind: 'new', object: obj, stay: ['Task', 'Campaign'].includes(obj) }) }] : []),
+      { label: obj === 'Report' ? 'All Reports' : obj === 'Dashboard' ? 'All Dashboards' : obj === 'File' ? 'Recent Files' : `All ${label}`, onClick: () => setRoute({ page: 'list', object: obj }) },
+      ...(rec.length ? [{ label: 'Recent records', header: true }, ...rec.map((x) => ({ label: x.name, icon: <ObjIcon type={obj} size={18} />, onClick: () => setRoute({ page: 'record', object: obj, id: x.id }) }))] : []),
+    ]
+  }
 
   return (
     <NavCtx.Provider value={{ go: setRoute, route }}>
-      <div className="flex-1 min-h-0 flex flex-col text-[13px] text-[#181818]" style={{ fontFamily: 'var(--font-sf)', background: '#B0C4DF' }}>
+     <ActionsCtx.Provider value={{ run: setAction, toast: show }}>
+      <div className="flex-1 min-h-0 flex flex-col text-[13px] text-[#181818] relative" style={{ fontFamily: 'var(--font-sf)', background: '#B0C4DF' }}>
         {/* global header */}
         <div className="h-[50px] shrink-0 bg-white flex items-center px-3 gap-4 relative z-30">
           <div className="w-[230px] shrink-0 flex items-center">
@@ -201,82 +235,113 @@ export default function Salesforce({ win, params }: AppProps) {
             <GlobalSearch />
           </div>
           <div className="w-[300px] shrink-0 flex items-center justify-end gap-1 text-[#747474]">
-            <div className="flex items-center">
-              <button className="w-7 h-7 rounded flex items-center justify-center hover:bg-[#F3F3F3]" aria-label="Favorites">
-                <Star size={18} />
-              </button>
-              <button className="w-4 h-7 flex items-center justify-center" aria-label="Favorites list">
-                <ChevronDown size={12} />
-              </button>
-            </div>
-            <button className="w-7 h-7 rounded flex items-center justify-center hover:bg-[#F3F3F3]" aria-label="Global Actions">
-              <span className="w-[18px] h-[18px] rounded-[3px] border-[1.5px] border-[#747474] flex items-center justify-center">
-                <Plus size={12} strokeWidth={3} />
-              </span>
-            </button>
-            <button className="w-8 h-8 rounded flex items-center justify-center hover:bg-[#F3F3F3]" aria-label="Guidance Center">
-              <Cloud size={19} />
-            </button>
-            <button className="w-8 h-8 rounded flex items-center justify-center hover:bg-[#F3F3F3]" aria-label="Help">
-              <CircleHelp size={19} />
-            </button>
-            <button className="w-8 h-8 rounded flex items-center justify-center hover:bg-[#F3F3F3]" aria-label="Setup">
-              <Settings size={19} />
-            </button>
-            <button className="relative w-8 h-8 rounded flex items-center justify-center hover:bg-[#F3F3F3]" aria-label="Notifications">
-              <Bell size={19} />
-              <span className="absolute top-0.5 right-0.5 min-w-[15px] h-[15px] px-1 rounded-full bg-[#BA0517] text-white text-[10px] font-bold leading-[15px]">3</span>
-            </button>
-            <button className="ml-1" aria-label="View profile">
-              <Avatar id={ME.id} size={32} />
-            </button>
+            <Favorites route={route} />
+            <GlobalActions />
+            <Guidance />
+            <Help />
+            <SetupMenu />
+            <Notifications />
+            <Profile />
           </div>
         </div>
         {/* app nav (context bar) */}
-        <div className="h-10 shrink-0 bg-white flex items-stretch border-b-[3px] border-[#1B96FF] relative z-20" style={{ boxShadow: '0 2px 3px rgba(0,0,0,0.12)' }}>
-          <button data-agent="sf-app-launcher" aria-label="App Launcher" className="w-12 flex items-center justify-center hover:bg-[#F3F3F3]">
+        <div data-sf-bar className="h-10 shrink-0 bg-white flex items-stretch border-b-[3px] border-[#1B96FF] relative z-20" style={{ boxShadow: '0 2px 3px rgba(0,0,0,0.12)' }}>
+          <button data-agent="sf-app-launcher" aria-label="App Launcher" onClick={() => setLauncher(true)} className="w-12 flex items-center justify-center hover:bg-[#F3F3F3]">
             <Waffle />
           </button>
           <div className="flex items-center pr-6 pl-1 text-[18px] text-[#181818] whitespace-nowrap">Sales</div>
           <nav className="flex items-stretch min-w-0 overflow-hidden">
-            {TABS.map(([obj, label]) => {
+            {tabs.map(([obj, label]) => {
               const active = activeTab === obj
               return (
                 <div key={obj} className={`relative flex items-stretch ${active ? 'bg-[#F3F6FB]' : 'hover:bg-[#F3F3F3]'}`}>
                   <button
                     data-agent={`sf-nav-${label.toLowerCase()}`}
                     aria-label={label}
-                    onClick={() => setRoute(obj === 'Home' ? { page: 'home' } : { page: 'list', object: obj })}
+                    onClick={() => setRoute(obj === 'Home' ? { page: 'home' } : obj === 'Setup' ? { page: 'setup' } : { page: 'list', object: obj })}
                     className="px-3 flex items-center text-[13px] text-[#181818] whitespace-nowrap"
                   >
                     {label}
                   </button>
-                  {obj !== 'Home' && obj !== 'Chatter' && obj !== 'Forecasts' && (
-                    <span className="flex items-center pr-2 pl-0.5 text-[#747474]">
+                  {obj !== 'Home' && obj !== 'Chatter' && obj !== 'Forecasts' && obj !== 'Setup' && (
+                    <button
+                      aria-label={`${label} List`}
+                      data-sf-navchev
+                      onClick={(e) => {
+                        const el = e.currentTarget.parentElement as HTMLElement
+                        const bar = el.closest('[data-sf-bar]') as HTMLElement
+                        setNavMenu(navMenu?.obj === obj ? null : { obj, left: el.getBoundingClientRect().left - bar.getBoundingClientRect().left })
+                      }}
+                      className="flex items-center pr-2 pl-0.5 text-[#747474]"
+                    >
                       <ChevronDown size={13} />
-                    </span>
+                    </button>
                   )}
                   {active && <span className="absolute left-0 right-0 -bottom-[3px] h-[3px] bg-[#0176D3]" />}
                 </div>
               )
             })}
           </nav>
+          {navMenu && (() => {
+            const t = tabs.find(([o]) => o === navMenu.obj)
+            if (!t) return null
+            return <NavMenu left={navMenu.left} items={navItems(t[0], t[1])} onClose={() => setNavMenu(null)} />
+          })()}
           <div className="flex-1" />
-          <button className="w-10 flex items-center justify-center text-[#747474] hover:bg-[#F3F3F3]" aria-label="Edit nav items">
+          <button className="w-10 flex items-center justify-center text-[#747474] hover:bg-[#F3F3F3]" aria-label="Edit nav items" onClick={() => setEditNav(true)}>
             <Pencil size={14} />
           </button>
         </div>
         {/* page */}
         <div ref={scroller} className="flex-1 min-h-0 overflow-auto relative" style={{ backgroundImage: 'linear-gradient(180deg, #8FB0DB 0px, #A9C1E1 120px, #B0C4DF 260px)' }}>
+          <ToastView toast={toast} hide={hide} />
           {route.page === 'home' && <Home />}
           {route.page === 'list' && (route.object === 'Report' ? <ReportsPage /> : route.object === 'Dashboard' ? <DashboardsPage /> : route.object === 'Forecasts' ? <ForecastsPage /> : route.object === 'Chatter' ? <ChatterPage /> : route.object === 'File' ? <FilesPage /> : <ListView key={route.object} object={route.object} />)}
           {route.page === 'record' && route.object === 'Opportunity' && <OpportunityPage key={route.id} id={route.id} />}
           {route.page === 'record' && route.object === 'Account' && <AccountPage key={route.id} id={route.id} />}
           {route.page === 'record' && route.object === 'Contact' && <ContactPage key={route.id} id={route.id} />}
           {route.page === 'record' && route.object === 'Lead' && <LeadPage key={route.id} id={route.id} />}
-          {route.page === 'search' && <SearchResults q={route.q} />}
+          {route.page === 'record' && route.object === 'Case' && <CasePage key={route.id} id={route.id} />}
+          {route.page === 'search' && <SearchResults key={route.q} q={route.q} />}
+          {route.page === 'report' && <ReportRun key={route.id} id={route.id} />}
+          {route.page === 'setup' && <SetupPage key={route.tab ?? 'home'} tab={route.tab} />}
         </div>
+        <ActionHost req={action} onClose={() => setAction(null)} />
+        {launcher && <AppLauncher onClose={() => setLauncher(false)} />}
+        {editNav && <EditNav onClose={() => setEditNav(false)} />}
       </div>
+     </ActionsCtx.Provider>
     </NavCtx.Provider>
+  )
+}
+
+function NavMenu({ items, onClose, left }: { left: number; items: MenuItem[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      const desk = ref.current?.closest('[data-desk]')
+      if (desk && !desk.contains(t)) return
+      if (t.closest?.('[data-sf-navchev]')) return
+      if (ref.current && !ref.current.contains(t)) onClose()
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [onClose])
+  return (
+    <div ref={ref} className="absolute top-full z-40" style={{ left }}>
+      <div role="menu" className="mt-[3px] bg-white rounded-[4px] border border-[#E5E5E5] py-1 w-[260px]" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.16)' }}>
+        {items.map((it, i) =>
+          it.header ? (
+            <div key={i} className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wide text-[#444]">{it.label}</div>
+          ) : (
+            <button key={i} role="menuitem" onClick={() => { onClose(); it.onClick?.() }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] hover:bg-[#F3F3F3] text-left">
+              {it.icon}
+              <span className="truncate">{it.label}</span>
+            </button>
+          ),
+        )}
+      </div>
+    </div>
   )
 }

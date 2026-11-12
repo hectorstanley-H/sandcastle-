@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { CaretLeft, EnvelopeSimple, Phone, MapPin, LinkedinLogo, CalendarPlus, ArrowRight, X, Check, FilePdf, VideoCamera, Tag, Clock } from '@phosphor-icons/react'
+import { CaretLeft, EnvelopeSimple, Phone, MapPin, LinkedinLogo, CalendarPlus, ArrowRight, X, Check, FilePdf, VideoCamera, Tag, Clock, ClipboardText, PencilSimple, ArrowCounterClockwise, Lock, CurrencyCircleDollar } from '@phosphor-icons/react'
 import { db, uid, useCollection, useRecord } from '@/db/db'
 import { useDesk } from '@/os/context'
 import { ME, PEOPLE, person } from '@/data/people'
@@ -9,6 +9,7 @@ import type { Candidate, Interview, Job, Stage } from './types'
 import { PIPELINE, STAGE_LABEL } from './types'
 import { Btn, Card, fmtActivity, fmtDay, fmtWhen, type Go, HWorkerChip, LOCATION_LABEL, pname, RATING_LABEL, RatingIcon, StagePill } from './shared'
 import { planFor, stageIndex } from './data'
+import { approveOffer, EditCandidateModal, GhModal, InterviewKitModal, logActivity, OfferModal, RejectModal, ScorecardModal, SendEmailModal } from './Modals'
 
 const TIMES = Array.from({ length: 21 }, (_, i) => {
   const h = 8 + Math.floor(i / 2)
@@ -26,6 +27,12 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
   const [moveOpen, setMoveOpen] = useState(false)
   const [moveTo, setMoveTo] = useState<Stage | null>(null)
   const [sched, setSched] = useState(false)
+  const [dlg, setDlg] = useState<null | 'email' | 'reject' | 'scorecard' | 'offer' | 'edit' | 'resume'>(null)
+  const [kit, setKit] = useState<Interview | null>(null)
+  const [scKey, setScKey] = useState<{ stage: Stage; key: string } | undefined>(undefined)
+  const [note, setNote] = useState('')
+  const [notePrivate, setNotePrivate] = useState(false)
+  const [notice, setNotice] = useState('')
   if (!c) return <div className="p-10">Candidate not found.</div>
   const job = jobs.find((j) => j.id === c.jobId)
   const plan = planFor(c, job, interviews)
@@ -43,6 +50,31 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
     }))
     setMoveOpen(false)
     setMoveTo(null)
+  }
+
+  const saveNote = () => {
+    if (!note.trim()) return
+    logActivity(c.id, { kind: 'note', by: actor, text: notePrivate ? 'Added a private note' : 'Added a note', body: note.trim(), createdBy: isAgent ? 'hworker' : undefined })
+    setNote('')
+    setNotePrivate(false)
+  }
+  const unreject = () => {
+    const back = (c.rejectedFrom ?? 'application_review') as Stage
+    logActivity(c.id, { kind: 'stage', by: actor, text: `Unrejected and returned to ${STAGE_LABEL[back]}`, createdBy: isAgent ? 'hworker' : undefined }, { stage: back, rejectedFrom: undefined, rejectReason: undefined, stageEnteredAt: new Date().toISOString() })
+  }
+  const offerStep = (status: 'pending_approval' | 'sent' | 'accepted' | 'declined', text: string) => {
+    if (!c.offer) return
+    logActivity(c.id, { kind: 'offer', by: actor, text, createdBy: isAgent ? 'hworker' : undefined }, { offer: { ...c.offer, status, ...(status === 'sent' ? { sentAt: new Date().toISOString() } : {}) } })
+  }
+  const markHired = () => {
+    const now = new Date().toISOString()
+    logActivity(c.id, { kind: 'hired', by: actor, text: `Marked as hired for ${job?.name}`, createdBy: isAgent ? 'hworker' : undefined }, { stage: 'hired', stageEnteredAt: now, updatedBy: isAgent ? 'hworker' : undefined })
+    if (job) db.update('greenhouse.jobs', job.id, (j: any) => ({ filled: Math.min(j.openings, (j.filled ?? 0) + 1) }))
+  }
+  const cancelInterview = (iv: Interview) => {
+    db.update('greenhouse.interviews', iv.id, { status: 'cancelled' })
+    if (iv.eventId && db.find('outlook.events', iv.eventId)) db.update('outlook.events', iv.eventId, { cancelled: true, title: `Canceled: ${db.find<any>('outlook.events', iv.eventId)?.title ?? iv.name}` })
+    logActivity(c.id, { kind: 'interview', by: actor, text: `Cancelled ${iv.name}`, createdBy: isAgent ? 'hworker' : undefined })
   }
 
   return (
@@ -64,19 +96,34 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
               <div className="text-[14px] text-[#3E4F49]">{c.title} at {c.company}</div>
               <div className="flex items-center gap-4 mt-2 text-[13px] text-[#5B6B66] flex-wrap">
                 <span className="flex items-center gap-1"><MapPin size={14} /> {c.location}</span>
-                <span className="flex items-center gap-1 text-[#1B7F62]"><EnvelopeSimple size={14} /> {c.email}</span>
+                <button onClick={() => setDlg('email')} className="flex items-center gap-1 text-[#1B7F62] hover:underline"><EnvelopeSimple size={14} /> {c.email}</button>
                 <span className="flex items-center gap-1"><Phone size={14} /> {c.phone}</span>
                 <span className="flex items-center gap-1 text-[#1B7F62]"><LinkedinLogo size={14} /> LinkedIn</span>
                 {c.tags.map((t) => <span key={t} className="flex items-center gap-1 h-5 px-1.5 rounded bg-[#EEF1EF] text-[12px] text-[#3E4F49]"><Tag size={11} /> {t}</span>)}
               </div>
             </div>
             <div className="flex gap-2 relative">
-              <Btn data-agent="greenhouse-send-email"><EnvelopeSimple size={15} /> Send Email</Btn>
+              <Btn data-agent="greenhouse-send-email" onClick={() => setDlg('email')}><EnvelopeSimple size={15} /> Send Email</Btn>
               <Btn data-agent="greenhouse-schedule-interview" aria-label="Schedule Interview" onClick={() => setSched(true)}><CalendarPlus size={15} /> Schedule Interview</Btn>
               <Btn kind="primary" data-agent="greenhouse-move-stage" aria-label="Move Stage" onClick={() => setMoveOpen(true)}>Move Stage <ArrowRight size={15} /></Btn>
-              <Btn kind="danger">Reject</Btn>
+              {c.stage === 'rejected' ? (
+                <Btn data-agent="greenhouse-unreject" onClick={unreject}><ArrowCounterClockwise size={15} /> Unreject</Btn>
+              ) : (
+                <Btn kind="danger" data-agent="greenhouse-reject" onClick={() => setDlg('reject')}>Reject</Btn>
+              )}
             </div>
           </div>
+          {c.stage === 'rejected' && (
+            <div className="mt-4 rounded-md bg-[#FBEAEA] border border-[#F0C4C1] px-4 py-2.5 text-[13.5px] text-[#A3302A]">
+              Rejected from <b>{STAGE_LABEL[(c.rejectedFrom ?? 'application_review') as Stage]}</b>{c.rejectReason ? ` — ${c.rejectReason}` : ''}
+            </div>
+          )}
+          {notice && (
+            <div className="mt-4 rounded-md bg-[#E3F5EC] border border-[#BFE3D3] px-4 py-2.5 text-[13.5px] text-[#11734B] flex items-center gap-2">
+              <Check size={15} weight="bold" /> <span className="flex-1">{notice}</span>
+              <button aria-label="Dismiss" onClick={() => setNotice('')}><X size={13} /></button>
+            </div>
+          )}
           {/* stage bar */}
           <div className="mt-5 flex items-center gap-1">
             {PIPELINE.map((s, i) => {
@@ -105,7 +152,17 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
           {tab === 'activity' && (
             <Card>
               <div className="p-4 border-b border-[#EDEFEE]">
-                <textarea aria-label="Add a note" placeholder="Add a note… use @ to mention a colleague" className="w-full h-16 rounded-md border border-[#C9D0CD] p-2.5 text-[13.5px] outline-none resize-none" />
+                <textarea aria-label="Add a note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note… use @ to mention a colleague" className="w-full h-16 rounded-md border border-[#C9D0CD] p-2.5 text-[13.5px] outline-none resize-none" />
+                {note.trim() && (
+                  <div className="flex items-center gap-3 mt-2">
+                    <label className="flex items-center gap-1.5 text-[13px] text-[#3E4F49]">
+                      <input type="checkbox" checked={notePrivate} onChange={(e) => setNotePrivate(e.target.checked)} className="w-4 h-4 accent-[#15372C]" /> <Lock size={13} /> Private
+                    </label>
+                    <span className="flex-1" />
+                    <Btn onClick={() => setNote('')}>Cancel</Btn>
+                    <Btn kind="primary" data-agent="greenhouse-note-save" onClick={saveNote}>Save Note</Btn>
+                  </div>
+                )}
               </div>
               {c.activity.map((a) => (
                 <div key={a.id} className={`flex gap-3 px-5 py-3.5 border-b border-[#EDEFEE] last:border-0 ${a.createdBy === 'hworker' && Date.now() - +new Date(a.at) < 120000 ? 'flash-new' : ''}`}>
@@ -121,6 +178,9 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
           )}
           {tab === 'scorecards' && (
             <div className="space-y-4">
+              <div className="flex justify-end">
+                <Btn kind="primary" data-agent="greenhouse-fill-scorecard" onClick={() => (setScKey(undefined), setDlg('scorecard'))}><ClipboardText size={15} /> Fill Out Scorecard</Btn>
+              </div>
               {c.scorecards.length === 0 && <Card><div className="p-6 text-[13.5px] text-[#5B6B66]">No scorecards submitted yet.</div></Card>}
               {c.scorecards.map((s) => (
                 <Card key={s.id}>
@@ -148,9 +208,9 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
             </div>
           )}
           {tab === 'details' && (
-            <Card>
+            <Card title="Details" action={<Btn onClick={() => setDlg('edit')}><PencilSimple size={14} /> Edit</Btn>}>
               <div className="p-5 grid grid-cols-[180px_1fr] gap-y-3 text-[13.5px]">
-                {[['Source', c.source + (c.referrer ? ` (referred by ${person(c.referrer).name})` : '')], ['Recruiter', pname(c.recruiter)], ['Coordinator', pname(c.coordinator)], ['Applied', fmtDay(c.appliedAt)], ['Education', c.education], ['Experience', c.experience.map((e) => `${e.title}, ${e.company} (${e.years})`).join(' · ')]].map(([k, v]) => (
+                {[['Source', c.source + (c.referrer ? ` (referred by ${person(c.referrer).name})` : '')], ['Recruiter', pname(c.recruiter)], ['Coordinator', pname(c.coordinator)], ['Applied', fmtDay(c.appliedAt)], ['Email', c.email], ['Phone', c.phone || '—'], ['Tags', c.tags.join(', ') || '—'], ['Education', c.education], ['Experience', c.experience.map((e) => `${e.title}, ${e.company} (${e.years})`).join(' · ')]].map(([k, v]) => (
                   <Fragment key={k}><div className="text-[#5B6B66]">{k}</div><div>{v}</div></Fragment>
                 ))}
               </div>
@@ -179,9 +239,63 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
                   )}
                 </div>
                 {p.interview && <div className="text-[12px] text-[#5B6B66] mt-0.5">{p.interview.interviewers.map(pname).join(', ')} · {LOCATION_LABEL[p.interview.location]}</div>}
+                {p.interview && (
+                  <div className="flex gap-3 mt-1 text-[12px] font-medium">
+                    <button onClick={() => setKit(p.interview!)} className="text-[#1B7F62] hover:underline">Interview Kit</button>
+                    {p.interview.status === 'scheduled' && <button onClick={() => cancelInterview(p.interview!)} className="text-[#A3302A] hover:underline">Cancel</button>}
+                  </div>
+                )}
+                {!p.interview && p.scorecards.length === 0 && c.stage !== 'rejected' && (
+                  <button onClick={() => (setScKey({ stage: c.stage, key: p.plan.key }), setDlg('scorecard'))} className="mt-1 text-[12px] font-medium text-[#1B7F62] hover:underline">Fill out scorecard</button>
+                )}
               </div>
             ))}
           </Card>
+          {(c.offer || c.stage === 'offer') && (
+            <Card title={<span className="flex items-center gap-2"><CurrencyCircleDollar size={18} /> Offer</span>} action={c.offer && ['draft', 'pending_approval', 'approved'].includes(c.offer.status) ? <button onClick={() => setDlg('offer')} className="text-[13px] text-[#1B7F62] font-medium hover:underline">Edit</button> : undefined}>
+              <div className="p-5 text-[13.5px]" data-agent="greenhouse-offer-card">
+                {!c.offer ? (
+                  <>
+                    <div className="text-[#5B6B66] mb-3">No offer has been created yet.</div>
+                    <Btn kind="primary" data-agent="greenhouse-offer-create" onClick={() => setDlg('offer')}>Create Offer</Btn>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1.5 mb-3">
+                      <div className="flex justify-between"><span className="text-[#5B6B66]">Base salary</span><b>{c.offer.salary}</b></div>
+                      <div className="flex justify-between"><span className="text-[#5B6B66]">Start date</span><span>{fmtDay(c.offer.startDate)}</span></div>
+                      {c.offer.bonus && <div className="flex justify-between"><span className="text-[#5B6B66]">Bonus</span><span>{c.offer.bonus}</span></div>}
+                      <div className="flex justify-between"><span className="text-[#5B6B66]">Status</span><span className="font-semibold">{OFFER_STATUS[c.offer.status]}</span></div>
+                    </div>
+                    <div className="text-[12px] uppercase tracking-wide font-semibold text-[#5B6B66] mb-1">Approvals</div>
+                    {c.offer.approvers.map((a) => {
+                      const ok = c.offer!.status !== 'draft' && c.offer!.status !== 'pending_approval' ? true : (c.offer!.approvedBy ?? []).includes(a)
+                      return (
+                        <div key={a} className="flex items-center gap-2 py-0.5">
+                          <Avatar id={a} size={20} /> <span className="flex-1">{pname(a)}</span>
+                          <span className={`text-[12px] font-medium ${ok ? 'text-[#11734B]' : 'text-[#8A5A00]'}`}>{ok ? 'Approved' : c.offer!.status === 'draft' ? 'Not requested' : 'Pending'}</span>
+                        </div>
+                      )
+                    })}
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {c.offer.status === 'draft' && <Btn kind="primary" onClick={() => offerStep('pending_approval', 'Requested offer approval')}>Request Approval</Btn>}
+                      {c.offer.status === 'pending_approval' && c.offer.approvers.includes(ME.id) && !(c.offer.approvedBy ?? []).includes(ME.id) && (
+                        <Btn kind="primary" data-agent="greenhouse-offer-approve" onClick={() => approveOffer(c, isAgent)}>Approve Offer</Btn>
+                      )}
+                      {c.offer.status === 'approved' && <Btn kind="primary" data-agent="greenhouse-offer-send" onClick={() => (offerStep('sent', `Sent the offer letter to ${c.name}`), setNotice(`Offer letter sent to ${c.email} for e-signature.`))}>Send Offer</Btn>}
+                      {c.offer.status === 'sent' && (
+                        <>
+                          <Btn kind="primary" onClick={() => offerStep('accepted', `${c.name.split(' ')[0]} accepted the offer`)}>Mark as Accepted</Btn>
+                          <Btn onClick={() => offerStep('declined', `${c.name.split(' ')[0]} declined the offer`)}>Mark as Declined</Btn>
+                        </>
+                      )}
+                      {c.offer.status === 'accepted' && c.stage !== 'hired' && <Btn kind="primary" data-agent="greenhouse-mark-hired" onClick={markHired}>Mark as Hired</Btn>}
+                    </div>
+                  </>
+                )}
+              </div>
+            </Card>
+          )}
           <Card title="Application">
             <div className="p-5 text-[13.5px] space-y-2">
               <div className="flex justify-between"><span className="text-[#5B6B66]">Job</span><span className="font-medium text-right">{job?.name}</span></div>
@@ -191,10 +305,10 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
           </Card>
           <Card title="Resume">
             <div className="p-5">
-              <div className="flex items-center gap-3 p-3 rounded-md border border-[#E1E4E2]">
+              <button onClick={() => setDlg('resume')} className="w-full text-left flex items-center gap-3 p-3 rounded-md border border-[#E1E4E2] hover:bg-[#F7F8F7]">
                 <FilePdf size={28} className="text-[#C9302C]" />
                 <div className="text-[13.5px]"><div className="font-medium">{c.name.replace(' ', '_')}_Resume.pdf</div><div className="text-[12px] text-[#5B6B66]">Uploaded {fmtDay(c.appliedAt)}</div></div>
-              </div>
+              </button>
               <div className="text-[13px] text-[#3E4F49] mt-3 leading-relaxed">{c.resumeSummary}</div>
             </div>
           </Card>
@@ -225,9 +339,42 @@ export function CandidateProfile({ candidateId, go }: { candidateId: string; go:
         </div>
       )}
       {sched && <ScheduleModal c={c} job={job} onClose={() => setSched(false)} />}
+      {dlg === 'email' && <SendEmailModal c={c} job={job} onClose={() => setDlg(null)} onSent={setNotice} />}
+      {dlg === 'reject' && <RejectModal c={c} job={job} onClose={() => setDlg(null)} />}
+      {dlg === 'scorecard' && <ScorecardModal c={c} job={job} initialKey={scKey} onClose={() => setDlg(null)} />}
+      {dlg === 'offer' && <OfferModal c={c} job={job} onClose={() => setDlg(null)} />}
+      {dlg === 'edit' && <EditCandidateModal c={c} onClose={() => setDlg(null)} />}
+      {dlg === 'resume' && (
+        <GhModal title={`${c.name.replace(' ', '_')}_Resume.pdf`} onClose={() => setDlg(null)} width={640} footer={<Btn onClick={() => setDlg(null)}>Close</Btn>}>
+          <div className="text-[20px] font-semibold">{c.name}</div>
+          <div className="text-[#5B6B66]">{c.location} · {c.email} · {c.phone}</div>
+          <div className="mt-4 text-[12px] uppercase tracking-wide font-semibold text-[#5B6B66]">Summary</div>
+          <div className="leading-relaxed mt-1">{c.resumeSummary}</div>
+          <div className="mt-4 text-[12px] uppercase tracking-wide font-semibold text-[#5B6B66]">Experience</div>
+          {c.experience.map((e, i) => (
+            <div key={i} className="mt-1"><b>{e.title}</b> · {e.company} <span className="text-[#5B6B66]">({e.years})</span></div>
+          ))}
+          <div className="mt-4 text-[12px] uppercase tracking-wide font-semibold text-[#5B6B66]">Education</div>
+          <div className="mt-1">{c.education}</div>
+        </GhModal>
+      )}
+      {kit && (
+        <InterviewKitModal
+          iv={kit}
+          c={c}
+          onClose={() => setKit(null)}
+          onScorecard={() => {
+            setScKey({ stage: kit.stage, key: kit.planKey ?? '' })
+            setKit(null)
+            setDlg('scorecard')
+          }}
+        />
+      )}
     </div>
   )
 }
+
+const OFFER_STATUS: Record<string, string> = { draft: 'Draft', pending_approval: 'Pending approval', approved: 'Approved — ready to send', sent: 'Sent to candidate', accepted: 'Accepted', declined: 'Declined' }
 
 function ScheduleModal({ c, job, onClose }: { c: Candidate; job?: Job; onClose: () => void }) {
   const { isAgent } = useDesk()

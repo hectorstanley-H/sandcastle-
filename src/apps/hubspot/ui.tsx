@@ -38,6 +38,9 @@ export type HRoute =
   | { page: 'kb-article'; id: string }
   | { page: 'goals' }
   | { page: 'properties' }
+  /** config-driven pages in Extras.tsx (campaigns, social, ads, invoices, data model…) */
+  | { page: 'extra'; kind: string }
+  | { page: 'settings'; tab?: string }
 
 export interface HNavCtx {
   go: (r: HRoute) => void

@@ -59,6 +59,8 @@ export interface Envelope {
   history: { at: string; action: string; by: string; detail: string }[]
   createdBy?: string
   deleted?: boolean
+  /** custom folder the envelope was moved to */
+  folderId?: string
 }
 export interface Template {
   id: string
@@ -74,6 +76,8 @@ export interface Template {
   updatedAt: string
   shared: boolean
   uses: number
+  deleted?: boolean
+  favorite?: boolean
 }
 
 export const isWaiting = (e: Envelope) => e.status === 'sent' || e.status === 'delivered'
@@ -147,7 +151,25 @@ export function Btn({
 }
 
 /** "Start" primary button with Docusign's dropdown. */
-export function StartButton({ onSend, onTemplate, wide, light }: { onSend: () => void; onTemplate: () => void; wide?: boolean; light?: boolean }) {
+export function StartButton({
+  onSend,
+  onTemplate,
+  onSign,
+  onBulk,
+  onWebForm,
+  onUpload,
+  wide,
+  light,
+}: {
+  onSend: () => void
+  onTemplate: () => void
+  onSign?: () => void
+  onBulk?: () => void
+  onWebForm?: () => void
+  onUpload?: () => void
+  wide?: boolean
+  light?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -163,11 +185,11 @@ export function StartButton({ onSend, onTemplate, wide, light }: { onSend: () =>
   }, [open])
   const items: [string, any, string, (() => void) | null, string?][] = [
     ['Send an Envelope', Send, 'docusign-start-envelope', onSend, 'Upload documents and add recipients'],
-    ['Sign a Document', FileSignature, 'docusign-start-sign', null, 'Sign a document yourself'],
+    ['Sign a Document', FileSignature, 'docusign-start-sign', onSign ?? null, 'Sign a document yourself'],
     ['Use a Template', LayoutTemplate, 'docusign-start-template', onTemplate, 'Start from a reusable template'],
-    ['Create a Web Form', FileText, 'docusign-start-webform', null],
-    ['Bulk Send', Users, 'docusign-start-bulk', null],
-    ['Upload a Completed Agreement', Upload, 'docusign-start-upload', null],
+    ['Create a Web Form', FileText, 'docusign-start-webform', onWebForm ?? null],
+    ['Bulk Send', Users, 'docusign-start-bulk', onBulk ?? null],
+    ['Upload a Completed Agreement', Upload, 'docusign-start-upload', onUpload ?? null],
   ]
   return (
     <div ref={ref} className={`relative ${wide ? 'w-full' : ''}`}>

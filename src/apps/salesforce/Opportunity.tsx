@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { FileText } from 'lucide-react'
 import { db, useCollection, useRecord } from '@/db/db'
 import { useDesk } from '@/os/context'
@@ -6,9 +6,11 @@ import { Avatar } from '@/components/Avatar'
 import { person } from '@/data/people'
 import { STAGES, STAGE_PROB, forecastFor } from '@/db/seeds/sales'
 import { Btn, HWChip, Link, inputCls, sfDate, sfDateTime, usd, useNav } from './ui'
-import { Confetti, DetailField, DetailSection, Highlights, Modal, Path, RelatedCard, TabsCard, ToastView, useToast, type FieldDef } from './record'
+import { Confetti, DetailField, DetailSection, Highlights, Modal, Path, PersonLink, RelatedCard, TabsCard, ToastView, useToast, type FieldDef } from './record'
 import { ActivityPanel } from './Activity'
 import { ChatterFeed } from './Chatter'
+import { useActions } from './forms'
+import { ContactRoleModal, FilePreview, NotesList, ProductModal, QuoteModal, UploadModal } from './related'
 
 const OPEN_STAGES = STAGES.slice(0, 8)
 
@@ -37,6 +39,10 @@ export function OpportunityPage({ id }: { id: string }) {
   const [closeStage, setCloseStage] = useState('Closed Won')
   const [confetti, setConfetti] = useState(false)
   const { toast, show, hide } = useToast()
+  const { run } = useActions()
+  const [rel, setRel] = useState<null | { kind: 'role' } | { kind: 'product'; index?: number } | { kind: 'quote'; id?: string } | { kind: 'upload' } | { kind: 'file'; f: any }>(null)
+  const notes = useCollection<any>('salesforce.notes').filter((n) => n.parentId === id)
+  const root = useRef<HTMLDivElement>(null)
   if (!opp) return <div className="p-6">Record not found.</div>
   const acct = accounts.find((a) => a.id === opp.accountId)
   const contacts = allContacts.filter((c) => c.accountId === opp.accountId)
@@ -107,12 +113,13 @@ export function OpportunityPage({ id }: { id: string }) {
 
   const ownerCell = (oid: string) => (
     <span className="inline-flex items-center gap-1.5">
-      <Avatar id={oid} size={20} /> <Link>{person(oid).name}</Link>
+      <Avatar id={oid} size={20} /> <Link onClick={() => run({ kind: 'owner', object: 'Opportunity', ids: [id] })}>{person(oid).name}</Link>
     </span>
   )
+  const scrollTo = (title: string) => root.current?.querySelector(`[data-rel="${title}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   const modifiedBy = (
     <span className="inline-flex items-center gap-1.5 flex-wrap">
-      <Avatar id="alex" size={20} /> <Link>Alex Morgan</Link>, {sfDateTime(opp.lastModified)} {opp.updatedBy === 'hworker' && <HWChip text="via H-Worker" />}
+      <Avatar id="alex" size={20} /> <PersonLink id="alex" />, {sfDateTime(opp.lastModified)} {opp.updatedBy === 'hworker' && <HWChip text="via H-Worker" />}
     </span>
   )
 
@@ -138,7 +145,7 @@ export function OpportunityPage({ id }: { id: string }) {
   ]
   const extra: FieldDef[] = [{ key: 'description', label: 'Description', type: 'textarea', full: true }]
   const sys: FieldDef[] = [
-    { key: 'createdDate', label: 'Created By', type: 'readonly', render: (v) => <span className="inline-flex items-center gap-1.5"><Avatar id={opp.ownerId} size={20} /> <Link>{person(opp.ownerId).name}</Link>, {sfDateTime(v)}</span> },
+    { key: 'createdDate', label: 'Created By', type: 'readonly', render: (v) => <span className="inline-flex items-center gap-1.5"><Avatar id={opp.ownerId} size={20} /> <PersonLink id={opp.ownerId} />, {sfDateTime(v)}</span> },
     { key: 'lastModified', label: 'Last Modified By', type: 'readonly', render: () => modifiedBy },
   ]
   const field = (f: FieldDef) => <DetailField key={f.key} f={f} rec={opp} editing={editing} draft={draft} setDraft={setDraft} onEdit={startEdit} prefix="sf-opp" />
@@ -146,13 +153,25 @@ export function OpportunityPage({ id }: { id: string }) {
   const products = opp.products ?? []
 
   return (
-    <div className="relative p-3 space-y-3 min-h-full">
+    <div ref={root} className="relative p-3 space-y-3 min-h-full">
       {confetti && <Confetti />}
       <ToastView toast={toast} hide={hide} />
       <Highlights
         object="Opportunity"
         title={opp.name}
+        recordId={id}
         badge={opp.updatedBy === 'hworker' ? <HWChip text="Updated by H-Worker" /> : null}
+        more={[
+          { label: 'Log a Call', onClick: () => { setTab('Activity'); setMode('call') } },
+          { label: 'Email', onClick: () => { setTab('Activity'); setMode('email') } },
+          { label: 'New Note', onClick: () => run({ kind: 'new', object: 'Note', defaults: { parentId: id, title: `${opp.name} — note` }, stay: true }) },
+          { label: 'Add Products', onClick: () => setRel({ kind: 'product' }) },
+          { label: 'New Quote', onClick: () => setRel({ kind: 'quote' }) },
+          { divider: true, label: '' },
+          { label: 'Change Owner', onClick: () => run({ kind: 'owner', object: 'Opportunity', ids: [id] }) },
+          { label: 'Clone', onClick: () => run({ kind: 'clone', object: 'Opportunity', id }) },
+          { label: 'Delete', onClick: () => run({ kind: 'delete', object: 'Opportunity', id, name: opp.name, after: () => go({ page: 'list', object: 'Opportunity' }) }) },
+        ]}
         fields={[
           ['Account Name', <Link onClick={() => go({ page: 'record', object: 'Account', id: acct.id })}>{acct?.name}</Link>],
           ['Close Date', sfDate(opp.closeDate)],
@@ -171,6 +190,7 @@ export function OpportunityPage({ id }: { id: string }) {
         closedWon={opp.stage === 'Closed Won'}
         closedLost={opp.stage === 'Closed Lost'}
         onAction={onPath}
+        onEditKeyFields={startEdit}
         guidance={GUIDANCE[opp.stage] ?? 'Congratulations! Make sure the contract fields are complete and hand over to Customer Success.'}
         keyFields={
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
@@ -205,15 +225,15 @@ export function OpportunityPage({ id }: { id: string }) {
           <div className="bg-white rounded-[4px] border border-[#C9C9C9] px-3 py-2 text-[13px]" style={{ boxShadow: '0 2px 2px 0 rgba(0,0,0,0.10)' }}>
             <div className="font-bold text-[14px] mb-1">Related List Quick Links</div>
             <div className="grid grid-cols-2 gap-y-1">
-              {[['Contact Roles', opp.contactRoles.length, '#A094ED'], ['Products', products.length, '#B781D3'], ['Quotes', opp.quotes.length, '#88C651'], ['Notes & Attachments', opp.files.length, '#9DA4B1'], ['Stage History', opp.stageHistory.length, '#7F8DE1'], ['Partners', 0, '#57A3FD']].map(([l, n, c]) => (
+              {[['Contact Roles', opp.contactRoles.length, '#A094ED', 'Contact Roles'], ['Products', products.length, '#B781D3', 'Products'], ['Quotes', opp.quotes.length, '#88C651', 'Quotes'], ['Notes & Attachments', opp.files.length + notes.length, '#9DA4B1', 'Files'], ['Stage History', opp.stageHistory.length, '#7F8DE1', 'Stage History'], ['Partners', 0, '#57A3FD', 'Notes']].map(([l, n, c, t]) => (
                 <span key={l as string} className="flex items-center gap-1.5">
                   <span className="w-4 h-4 rounded-[3px]" style={{ background: c as string }} />
-                  <Link className="text-[13px]">{l} ({n})</Link>
+                  <Link className="text-[13px]" onClick={() => scrollTo(t as string)}>{l} ({n})</Link>
                 </span>
               ))}
             </div>
           </div>
-          <RelatedCard icon="ContactRole" title="Contact Roles" count={opp.contactRoles.length}>
+          <RelatedCard icon="ContactRole" title="Contact Roles" count={opp.contactRoles.length} onNew={() => setRel({ kind: 'role' })} newLabel="Add Contact Roles">
             {opp.contactRoles.map((cr: any) => {
               const c = allContacts.find((x) => x.id === cr.contactId)
               if (!c) return null
@@ -226,32 +246,35 @@ export function OpportunityPage({ id }: { id: string }) {
               )
             })}
           </RelatedCard>
-          <RelatedCard icon="Product" title="Products" count={products.length} agent="sf-opp-products">
-            {products.map((p: any) => (
-              <div key={p.name} className="py-1.5 text-[12px]">
-                <Link className="text-[13px]">{p.name}</Link>
+          <RelatedCard icon="Product" title="Products" count={products.length} agent="sf-opp-products" onNew={() => setRel({ kind: 'product' })} newLabel="Add Products">
+            {products.map((p: any, pi: number) => (
+              <div key={p.name + pi} className="py-1.5 text-[12px]">
+                <Link className="text-[13px]" onClick={() => setRel({ kind: 'product', index: pi })}>{p.name}</Link>
                 <div className="grid grid-cols-[80px_1fr]"><span className="text-[#444]">Quantity:</span><span>{Number(p.qty).toLocaleString()}</span><span className="text-[#444]">Sales Price:</span><span>{usd(p.price)}</span><span className="text-[#444]">Total Price:</span><span>{usd(p.qty * p.price)}</span></div>
               </div>
             ))}
           </RelatedCard>
-          <RelatedCard icon="Quote" title="Quotes" count={opp.quotes.length}>
+          <RelatedCard icon="Quote" title="Quotes" count={opp.quotes.length} onNew={() => setRel({ kind: 'quote' })} newLabel="New Quote">
             {opp.quotes.map((q: any) => (
               <div key={q.id} className="py-1.5 text-[12px]">
-                <Link className="text-[13px]">{q.name}</Link>
+                <Link className="text-[13px]" onClick={() => setRel({ kind: 'quote', id: q.id })}>{q.name}</Link>
                 <div className="grid grid-cols-[80px_1fr]"><span className="text-[#444]">Status:</span><span>{q.status}</span><span className="text-[#444]">Total:</span><span>{usd(q.total)}</span><span className="text-[#444]">Expires:</span><span>{sfDate(q.expires)}</span></div>
               </div>
             ))}
           </RelatedCard>
-          <RelatedCard icon="File" title="Files" count={opp.files.length}>
-            {opp.files.map((f: any) => (
-              <div key={f.name} className="flex items-center gap-2 py-1.5">
+          <RelatedCard icon="File" title="Files" count={opp.files.length} onNew={() => setRel({ kind: 'upload' })} newLabel="Upload Files">
+            {opp.files.map((f: any, fi: number) => (
+              <div key={f.name + fi} className="flex items-center gap-2 py-1.5">
                 <span className={`w-7 h-8 rounded-[3px] flex items-center justify-center text-white ${f.kind === 'pdf' ? 'bg-[#E65A5A]' : f.kind === 'pptx' ? 'bg-[#FF8B4C]' : 'bg-[#4A90E2]'}`}><FileText size={14} /></span>
                 <div className="min-w-0">
-                  <Link className="text-[13px] truncate block">{f.name}</Link>
+                  <Link className="text-[13px] truncate block" onClick={() => setRel({ kind: 'file', f })}>{f.name}</Link>
                   <div className="text-[11.5px] text-[#444]">{sfDate(f.date)} • {f.size} • {f.kind}</div>
                 </div>
               </div>
             ))}
+          </RelatedCard>
+          <RelatedCard icon="Note" title="Notes" count={notes.length} onNew={() => run({ kind: 'new', object: 'Note', defaults: { parentId: id, title: '' }, stay: true })} newLabel="New Note">
+            <NotesList parentId={id} />
           </RelatedCard>
           <RelatedCard icon="History" title="Stage History" count={opp.stageHistory.length}>
             {[...opp.stageHistory].reverse().slice(0, 4).map((h: any, i: number) => (
@@ -263,6 +286,11 @@ export function OpportunityPage({ id }: { id: string }) {
           </RelatedCard>
         </div>
       </div>
+      {rel?.kind === 'role' && <ContactRoleModal oppId={id} contacts={contacts} onClose={() => setRel(null)} />}
+      {rel?.kind === 'product' && <ProductModal oppId={id} index={rel.index} onClose={() => setRel(null)} />}
+      {rel?.kind === 'quote' && <QuoteModal oppId={id} quoteId={rel.id} onClose={() => setRel(null)} />}
+      {rel?.kind === 'upload' && <UploadModal col="salesforce.opportunities" id={id} onClose={() => setRel(null)} />}
+      {rel?.kind === 'file' && <FilePreview f={rel.f} onClose={() => setRel(null)} />}
       {closeModal && (
         <Modal
           title="Close This Opportunity"

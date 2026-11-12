@@ -1,6 +1,9 @@
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts'
+import { useRef } from 'react'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts'
+import { DataBarVertical20Regular, DataBarHorizontal20Regular, DataLine20Regular, DataArea20Regular, DataPie20Regular, Delete20Regular } from '@fluentui/react-icons'
 import { logoUrl } from '@/os/registry'
 import type { Chart, Sheet } from './seed'
+import type { ChartType } from './types'
 import { Evaluator, parseRange, refName, formatValue, type Val } from './formula'
 
 export const CHART_COLORS = ['#156082', '#E97132', '#196B24', '#0F9ED5', '#A02B93', '#4EA72E']
@@ -63,6 +66,10 @@ export function ChartObject({
   onSelect,
   onTitle,
   fresh,
+  colors = CHART_COLORS,
+  onType,
+  onDelete,
+  onMove,
 }: {
   chart: Chart
   sheet: Sheet
@@ -74,14 +81,41 @@ export function ChartObject({
   onSelect: () => void
   onTitle: (t: string) => void
   fresh: boolean
+  colors?: string[]
+  onType?: (t: ChartType) => void
+  onDelete?: () => void
+  /** drag finished: pixel offset from the original position */
+  onMove?: (dx: number, dy: number) => void
 }) {
   const { rows, series } = chartData(sheet, si, ev, chart.range)
+  const type = ((chart as any).type ?? 'column') as ChartType
+  const drag = useRef<{ x: number; y: number; el: HTMLElement } | null>(null)
+  const money = rows.some((r) => series.some((s) => Math.abs(r[s]) >= 1000))
+  const tip = (v: any) => (money ? `$${Number(v).toLocaleString('en-US')}` : Number(v).toLocaleString('en-US'))
   return (
     <div
       data-agent={`excel-chart-${chart.id}`}
       onMouseDown={(e) => {
         e.stopPropagation()
         onSelect()
+        const t = e.target as HTMLElement
+        if (!onMove || t.tagName === 'INPUT' || t.closest('[data-chart-tools]')) return
+        const el = e.currentTarget as HTMLElement
+        drag.current = { x: e.clientX, y: e.clientY, el }
+        const mv = (ev: MouseEvent) => {
+          if (!drag.current) return
+          el.style.transform = `translate(${ev.clientX - drag.current.x}px, ${ev.clientY - drag.current.y}px)`
+        }
+        const up = (ev: MouseEvent) => {
+          window.removeEventListener('mousemove', mv)
+          window.removeEventListener('mouseup', up)
+          const d = drag.current
+          drag.current = null
+          el.style.transform = ''
+          if (d && (Math.abs(ev.clientX - d.x) > 4 || Math.abs(ev.clientY - d.y) > 4)) onMove(ev.clientX - d.x, ev.clientY - d.y)
+        }
+        window.addEventListener('mousemove', mv)
+        window.addEventListener('mouseup', up)
       }}
       className={`absolute bg-white ${selected ? 'outline outline-[1.5px] outline-[#7F7F7F]' : 'border border-[#D9D9D9]'} ${fresh ? 'flash-new' : ''}`}
       style={{ left, top, width: chart.w, height: chart.h, zIndex: 6 }}
@@ -109,18 +143,84 @@ export function ChartObject({
       />
       <div className="absolute left-2 right-3 top-9 bottom-2">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={rows} margin={{ top: 6, right: 6, left: 4, bottom: 0 }} barGap={2} barCategoryGap="22%">
-            <CartesianGrid vertical={false} stroke="#D9D9D9" />
-            <XAxis dataKey="name" tick={<WrapTick />} tickLine={false} axisLine={{ stroke: '#BFBFBF' }} interval={0} height={34} />
-            <YAxis tick={{ fontSize: 10.5, fill: '#595959' }} tickLine={false} axisLine={false} tickFormatter={compact} width={48} />
-            <Tooltip formatter={(v: any) => `$${Number(v).toLocaleString('en-US')}`} />
-            <Legend iconType="square" iconSize={9} wrapperStyle={{ fontSize: 11, color: '#595959' }} />
-            {series.map((s, i) => (
-              <Bar key={s} dataKey={s} fill={CHART_COLORS[i % CHART_COLORS.length]} isAnimationActive={fresh} />
-            ))}
-          </BarChart>
+          {type === 'pie' ? (
+            <PieChart>
+              <Tooltip formatter={tip} />
+              <Legend iconType="square" iconSize={9} wrapperStyle={{ fontSize: 11, color: '#595959' }} />
+              <Pie data={rows} dataKey={series[0] ?? 'value'} nameKey="name" outerRadius="78%" isAnimationActive={fresh} label={{ fontSize: 10.5, fill: '#595959' }}>
+                {rows.map((_, i) => (
+                  <Cell key={i} fill={colors[i % colors.length]} />
+                ))}
+              </Pie>
+            </PieChart>
+          ) : type === 'line' ? (
+            <LineChart data={rows} margin={{ top: 6, right: 10, left: 4, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#D9D9D9" />
+              <XAxis dataKey="name" tick={<WrapTick />} tickLine={false} axisLine={{ stroke: '#BFBFBF' }} interval={0} height={34} />
+              <YAxis tick={{ fontSize: 10.5, fill: '#595959' }} tickLine={false} axisLine={false} tickFormatter={compact} width={48} />
+              <Tooltip formatter={tip} />
+              <Legend iconType="plainline" iconSize={12} wrapperStyle={{ fontSize: 11, color: '#595959' }} />
+              {series.map((s, i) => (
+                <Line key={s} dataKey={s} stroke={colors[i % colors.length]} strokeWidth={2.25} dot={{ r: 2.5 }} isAnimationActive={fresh} />
+              ))}
+            </LineChart>
+          ) : type === 'area' ? (
+            <AreaChart data={rows} margin={{ top: 6, right: 10, left: 4, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#D9D9D9" />
+              <XAxis dataKey="name" tick={<WrapTick />} tickLine={false} axisLine={{ stroke: '#BFBFBF' }} interval={0} height={34} />
+              <YAxis tick={{ fontSize: 10.5, fill: '#595959' }} tickLine={false} axisLine={false} tickFormatter={compact} width={48} />
+              <Tooltip formatter={tip} />
+              <Legend iconType="square" iconSize={9} wrapperStyle={{ fontSize: 11, color: '#595959' }} />
+              {series.map((s, i) => (
+                <Area key={s} dataKey={s} stroke={colors[i % colors.length]} fill={colors[i % colors.length]} fillOpacity={0.35} isAnimationActive={fresh} />
+              ))}
+            </AreaChart>
+          ) : type === 'bar' ? (
+            <BarChart layout="vertical" data={rows} margin={{ top: 6, right: 10, left: 4, bottom: 0 }} barGap={2} barCategoryGap="22%">
+              <CartesianGrid horizontal={false} stroke="#D9D9D9" />
+              <XAxis type="number" tick={{ fontSize: 10.5, fill: '#595959' }} tickLine={false} axisLine={false} tickFormatter={compact} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10.5, fill: '#595959' }} tickLine={false} axisLine={{ stroke: '#BFBFBF' }} width={110} />
+              <Tooltip formatter={tip} />
+              <Legend iconType="square" iconSize={9} wrapperStyle={{ fontSize: 11, color: '#595959' }} />
+              {series.map((s, i) => (
+                <Bar key={s} dataKey={s} fill={colors[i % colors.length]} isAnimationActive={fresh} />
+              ))}
+            </BarChart>
+          ) : (
+            <BarChart data={rows} margin={{ top: 6, right: 6, left: 4, bottom: 0 }} barGap={2} barCategoryGap="22%">
+              <CartesianGrid vertical={false} stroke="#D9D9D9" />
+              <XAxis dataKey="name" tick={<WrapTick />} tickLine={false} axisLine={{ stroke: '#BFBFBF' }} interval={0} height={34} />
+              <YAxis tick={{ fontSize: 10.5, fill: '#595959' }} tickLine={false} axisLine={false} tickFormatter={compact} width={48} />
+              <Tooltip formatter={(v: any) => `$${Number(v).toLocaleString('en-US')}`} />
+              <Legend iconType="square" iconSize={9} wrapperStyle={{ fontSize: 11, color: '#595959' }} />
+              {series.map((s, i) => (
+                <Bar key={s} dataKey={s} fill={colors[i % colors.length]} isAnimationActive={fresh} />
+              ))}
+            </BarChart>
+          )}
         </ResponsiveContainer>
       </div>
+      {selected && (onType || onDelete) && (
+        <div data-chart-tools className="absolute -right-[38px] top-0 flex flex-col gap-0.5 bg-white rounded-md border border-[#D1D1D1] shadow-[0_2px_8px_rgba(0,0,0,0.14)] p-0.5" onMouseDown={(e) => e.stopPropagation()}>
+          {(
+            [
+              ['column', DataBarVertical20Regular, 'Clustered Column'],
+              ['bar', DataBarHorizontal20Regular, 'Clustered Bar'],
+              ['line', DataLine20Regular, 'Line'],
+              ['area', DataArea20Regular, 'Area'],
+              ['pie', DataPie20Regular, 'Pie'],
+            ] as [ChartType, any, string][]
+          ).map(([t, I, l]) => (
+            <button key={t} title={`Change chart type: ${l}`} aria-label={`Change chart type: ${l}`} onClick={() => onType?.(t)} className={`w-7 h-7 rounded flex items-center justify-center ${type === t ? 'bg-[#D3F0E0] text-[#0E5C2F]' : 'text-[#424242] hover:bg-[#F0F0F0]'}`}>
+              <I className="w-4 h-4" />
+            </button>
+          ))}
+          <span className="h-px bg-[#E1E1E1] mx-1" />
+          <button title="Delete chart" aria-label="Delete chart" onClick={onDelete} className="w-7 h-7 rounded flex items-center justify-center text-[#C42B1C] hover:bg-[#FDE7E9]">
+            <Delete20Regular className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       {chart.createdBy === 'hworker' && (
         <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-[#430693] text-white text-[10px] font-semibold">
           <img src={logoUrl('hworker')} className="w-3 h-3 rounded-sm" alt="" /> H-Worker

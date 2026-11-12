@@ -14,7 +14,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { ChevronDown12Regular } from '@fluentui/react-icons'
+import { useState } from 'react'
+import { ChevronDown12Regular, Checkmark12Regular } from '@fluentui/react-icons'
 import { AXIS, BubbleMap, GRID, KpiCard, Legend, Matrix, Visual, fmtVal, type Fmt } from './visuals'
 import { THEME, fmtN } from './shared'
 
@@ -30,7 +31,43 @@ function cardsRow(n: number) {
   return Array.from({ length: n }, (_, i) => ({ x: P + i * (w + gap), y: 60, w, h: 96 }))
 }
 
-function Header({ rec, subtitle }: { rec: any; subtitle: string }) {
+export interface OpsFilter {
+  region: string[]
+  dc: string[]
+}
+export const NO_FILTER: OpsFilter = { region: [], dc: [] }
+
+function Slicer({ label, value, options, selected, onChange }: { label: string; value: string; options: string[]; selected: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="w-[150px] relative">
+      <div className="text-[10.5px] text-[#605E5C] leading-[13px]">{label}</div>
+      <button
+        data-agent={`powerbi-slicer-${label.toLowerCase().replace(/\s+/g, '-')}`}
+        onClick={() => setOpen((o) => !o)}
+        className="w-full h-[24px] border border-[#C8C6C4] rounded-[2px] flex items-center justify-between px-1.5 text-[12px] text-[#252423] bg-white hover:border-[#8A8886]"
+      >
+        <span className="truncate">{value}</span> <ChevronDown12Regular className="text-[#605E5C] shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-[40px] z-40 w-[200px] bg-white rounded shadow-[0_6px_14px_rgba(0,0,0,0.18)] py-1 text-[12px]" onMouseLeave={() => setOpen(false)}>
+          <button onClick={() => (onChange([]), setOpen(false))} className="w-full flex items-center gap-2 h-7 px-2 hover:bg-[#F3F2F1] text-left">
+            <span className="w-3.5 h-3.5 border border-[#605E5C] rounded-[2px] flex items-center justify-center">{!selected.length && <Checkmark12Regular />}</span> Select all
+          </button>
+          {options.map((o) => (
+            <button key={o} onClick={() => onChange(selected.includes(o) ? selected.filter((x) => x !== o) : [...selected, o])} className="w-full flex items-center gap-2 h-7 px-2 hover:bg-[#F3F2F1] text-left">
+              <span className="w-3.5 h-3.5 border border-[#605E5C] rounded-[2px] flex items-center justify-center">{selected.includes(o) && <Checkmark12Regular />}</span>
+              <span className="truncate">{o}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Header({ rec, subtitle, filter, setFilter }: { rec: any; subtitle: string; filter?: OpsFilter; setFilter?: (f: OpsFilter) => void }) {
+  const regions: string[] = rec.byRegion?.map((r: any) => r.region) ?? []
   return (
     <div className="absolute left-0 top-0 right-0 h-[52px] flex items-center px-4 border-b border-[#EDEBE9]">
       <div className="w-8 h-8 rounded-md bg-[#12239E] text-white flex items-center justify-center text-[15px] font-bold mr-2.5">N</div>
@@ -39,7 +76,24 @@ function Header({ rec, subtitle }: { rec: any; subtitle: string }) {
         <div className="text-[11.5px] text-[#605E5C]">{subtitle}</div>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        {(rec.kpis
+        {rec.kpis && filter && setFilter && (
+          <>
+            <div className="w-[150px]">
+              <div className="text-[10.5px] text-[#605E5C] leading-[13px]">Fiscal week</div>
+              <div className="h-[24px] border border-[#C8C6C4] rounded-[2px] flex items-center justify-between px-1.5 text-[12px] text-[#252423]">
+                Week {rec.fiscalWeek} <ChevronDown12Regular className="text-[#605E5C]" />
+              </div>
+            </div>
+            <Slicer label="Region" value={filter.region.length ? (filter.region.length === 1 ? filter.region[0] : 'Multiple selections') : 'All'} options={regions} selected={filter.region} onChange={(region) => setFilter({ ...filter, region })} />
+            <div className="w-[150px]">
+              <div className="text-[10.5px] text-[#605E5C] leading-[13px]">Channel</div>
+              <div className="h-[24px] border border-[#C8C6C4] rounded-[2px] flex items-center justify-between px-1.5 text-[12px] text-[#252423]">
+                All <ChevronDown12Regular className="text-[#605E5C]" />
+              </div>
+            </div>
+          </>
+        )}
+        {!(rec.kpis && filter && setFilter) && (rec.kpis
           ? [
               ['Fiscal week', `Week ${rec.fiscalWeek}`],
               ['Region', 'All'],
@@ -64,26 +118,54 @@ function Header({ rec, subtitle }: { rec: any; subtitle: string }) {
 
 /* ──────────────────────────────── ops report ──────────────────────────────── */
 
-export function OpsPage({ rec, page, loading }: { rec: any; page: number; loading: boolean }) {
-  const k = rec.kpis
-  const p = rec.prevKpis
-  const t = rec.targets ?? {}
-  const key = rec.lastRefreshed
-  const sub = `Fiscal Week ${rec.fiscalWeek} · ${rec.weekRange} · All distribution centers`
+/** aggregate KPIs over a subset of distribution centers (weighted by orders) */
+function aggregate(rows: any[], k: any) {
+  const orders = rows.reduce((a, r) => a + r.orders, 0) || 1
+  const w = (f: string) => Math.round((rows.reduce((a, r) => a + r[f] * r.orders, 0) / orders) * 100) / 100
+  return {
+    ...k,
+    ordersShipped: rows.reduce((a, r) => a + r.orders, 0),
+    onTimeDelivery: Math.round(w('onTime') * 10) / 10,
+    warehouseSla: Math.round(w('sla') * 10) / 10,
+    orderCycleTimeDays: Math.round(w('cycleDays') * 10) / 10,
+    costPerOrder: w('costPerOrder'),
+    backorders: rows.reduce((a, r) => a + r.backorders, 0),
+  }
+}
+
+export function OpsPage({ rec: rec0, page, loading, filter = NO_FILTER, setFilter }: { rec: any; page: number; loading: boolean; filter?: OpsFilter; setFilter?: (f: OpsFilter) => void }) {
+  const filtered = filter.region.length > 0 || filter.dc.length > 0
+  const rows = filtered ? rec0.byRegion.filter((r: any) => (!filter.region.length || filter.region.includes(r.region)) && (!filter.dc.length || filter.dc.includes(r.dc))) : rec0.byRegion
+  const rec = filtered ? { ...rec0, byRegion: rows.length ? rows : rec0.byRegion } : rec0
+  const k = filtered && rows.length ? aggregate(rows, rec0.kpis) : rec0.kpis
+  const p = filtered && rows.length ? { ordersShipped: rows.reduce((a: number, r: any) => a + r.prevOrders, 0) } : rec0.prevKpis
+  const t = rec0.targets ?? {}
+  const key = rec0.lastRefreshed
+  const scope = filter.dc.length ? filter.dc.join(', ') : filter.region.length ? `${filter.region.join(', ')} region${filter.region.length > 1 ? 's' : ''}` : 'All distribution centers'
+  const sub = `Fiscal Week ${rec0.fiscalWeek} · ${rec0.weekRange} · ${scope}`
+  const cross = setFilter
+    ? {
+        region: (v: string) => setFilter({ ...filter, region: filter.region.length === 1 && filter.region[0] === v ? [] : [v] }),
+        dc: (v: string) => setFilter({ ...filter, dc: filter.dc.length === 1 && filter.dc[0] === v ? [] : [v] }),
+        isDc: (v: string) => filter.dc.includes(v),
+        isRegion: (v: string) => filter.region.includes(v),
+      }
+    : undefined
   return (
     <>
-      <Header rec={rec} subtitle={sub} />
-      {page === 0 && <Exec rec={rec} k={k} p={p} t={t} loading={loading} key={key} />}
+      <Header rec={rec0} subtitle={sub} filter={filter} setFilter={setFilter} />
+      {page === 0 && <Exec rec={rec} k={k} p={p} t={t} loading={loading} key={key} cross={cross} />}
       {page === 1 && <Fulfillment rec={rec} k={k} p={p} t={t} loading={loading} key={key} />}
-      {page === 2 && <WarehouseSla rec={rec} k={k} p={p} t={t} loading={loading} key={key} />}
-      {page === 3 && <VendorSpend rec={rec} k={k} p={p} t={t} loading={loading} key={key} />}
+      {page === 2 && <WarehouseSla rec={rec} k={k} p={p} t={t} loading={loading} key={key} cross={cross} />}
+      {page === 3 && <VendorSpend rec={rec0} k={rec0.kpis} p={rec0.prevKpis} t={t} loading={loading} key={key} />}
     </>
   )
 }
 
-type PP = { rec: any; k: any; p: any; t: any; loading: boolean }
+type Cross = { region: (v: string) => void; dc: (v: string) => void; isDc: (v: string) => boolean; isRegion: (v: string) => boolean }
+type PP = { rec: any; k: any; p: any; t: any; loading: boolean; cross?: Cross }
 
-function Exec({ rec, k, p, t, loading }: PP) {
+function Exec({ rec, k, p, t, loading, cross }: PP) {
   const c = cardsRow(7)
   const cards: [string, string, Fmt, boolean?][] = [
     ['ordersShipped', 'Orders shipped', 'int'],
@@ -119,10 +201,10 @@ function Exec({ rec, k, p, t, loading }: PP) {
           <XAxis dataKey="name" tick={{ ...AXIS, fontSize: 10 }} tickLine={false} axisLine={{ stroke: '#C8C6C4' }} interval={0} />
           <YAxis tick={AXIS} tickLine={false} axisLine={false} tickFormatter={kfmt} />
           <Tooltip formatter={(v: any) => fmtN(v)} />
-          <Bar dataKey="tw" name="This week" fill={THEME[0]} animationDuration={ANIM}>
+          <Bar dataKey="tw" name="This week" fill={THEME[0]} animationDuration={ANIM} onClick={cross ? (d: any) => cross.region(d?.name ?? d?.payload?.name) : undefined} style={cross ? { cursor: 'pointer' } : undefined}>
             <LabelList dataKey="tw" position="top" formatter={(v: any) => `${(v / 1000).toFixed(1)}K`} style={{ fontSize: 9, fill: '#605E5C' }} />
           </Bar>
-          <Bar dataKey="lw" name="Last week" fill={THEME[1]} animationDuration={ANIM} />
+          <Bar dataKey="lw" name="Last week" fill={THEME[1]} animationDuration={ANIM} onClick={cross ? (d: any) => cross.region(d?.name ?? d?.payload?.name) : undefined} style={cross ? { cursor: 'pointer' } : undefined} />
         </BarChart>
       </Visual>
       <Visual x={952} y={164} w={312} h={268} title="Orders by carrier" sub={`${fmtN(k.ordersShipped)} orders`} loading={loading}>
@@ -145,6 +227,8 @@ function Exec({ rec, k, p, t, loading }: PP) {
           ]}
           rows={rec.byRegion}
           total={{ dc: 'Total', orders: tot.orders, onTime: k.onTimeDelivery, sla: k.warehouseSla, cycleDays: k.orderCycleTimeDays, backorders: tot.backorders, costPerOrder: k.costPerOrder }}
+          onRow={cross ? (r) => cross.dc(r.dc) : undefined}
+          selected={cross ? (r) => cross.isDc(r.dc) : undefined}
         />
       </Visual>
     </>
@@ -216,7 +300,7 @@ function Fulfillment({ rec, k, p, t, loading }: PP) {
   )
 }
 
-function WarehouseSla({ rec, k, t, loading }: PP) {
+function WarehouseSla({ rec, k, t, loading, cross }: PP) {
   const R = rec.byRegion
   const avg = (f: string) => R.reduce((a: number, r: any) => a + r[f] * r.orders, 0) / R.reduce((a: number, r: any) => a + r.orders, 0)
   const sla = k.warehouseSla
@@ -251,7 +335,7 @@ function WarehouseSla({ rec, k, t, loading }: PP) {
           <YAxis tick={AXIS} tickLine={false} axisLine={false} domain={[94, 100]} tickFormatter={(v) => `${v}%`} />
           <Tooltip />
           <ReferenceLine y={tgt} stroke="#D64550" strokeDasharray="4 3" label={{ value: `Target ${tgt}%`, fill: '#D64550', fontSize: 10, position: 'insideTopRight' }} />
-          <Bar dataKey="sla" barSize={56} animationDuration={ANIM}>
+          <Bar dataKey="sla" barSize={56} animationDuration={ANIM} onClick={cross ? (d: any) => cross.dc(d?.dc ?? d?.payload?.dc) : undefined} style={cross ? { cursor: 'pointer' } : undefined}>
             {R.map((r: any) => (
               <Cell key={r.dc} fill={r.sla >= tgt ? THEME[0] : THEME[2]} />
             ))}
@@ -272,6 +356,8 @@ function WarehouseSla({ rec, k, t, loading }: PP) {
           ]}
           rows={R}
           total={{ dc: 'Total', sla: k.warehouseSla, pickAccuracy: avg('pickAccuracy'), dockToStockHrs: avg('dockToStockHrs'), backorders: k.backorders, cycleDays: k.orderCycleTimeDays }}
+          onRow={cross ? (r) => cross.dc(r.dc) : undefined}
+          selected={cross ? (r) => cross.isDc(r.dc) : undefined}
         />
       </Visual>
       <Visual x={784} y={368} w={480} h={336} title="On-time delivery % trend" sub="Actual vs target" loading={loading}>

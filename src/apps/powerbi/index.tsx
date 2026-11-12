@@ -31,21 +31,28 @@ import {
 } from '@fluentui/react-icons'
 import type { AppProps } from '@/os/registry'
 import { logoUrl } from '@/os/registry'
-import { useWin } from '@/os/context'
+import { useDesk, useWin } from '@/os/context'
 import { Avatar } from '@/components/Avatar'
 import { ME } from '@/data/people'
-import { useCollection } from '@/db/db'
-import { ItemIcon, PbiContext, itemUrl, type Notice, type PbiCtx } from './shared'
+import { db, useCollection } from '@/db/db'
+import { ItemIcon, PbiContext, TYPE_LABEL, fmtDT, itemUrl, type Notice, type PbiCtx } from './shared'
 import { HomeView } from './Home'
 import { WorkspaceView } from './Workspace'
 import { ReportView } from './Report'
 import { DashboardView } from './Dashboard'
 import { ModelView } from './Model'
+import { BrowseView, CreateView, FeedbackDialog, ItemSettingsDialog, LearnView, MetricsView, MonitorView, NewWorkspaceDialog, OneLakeView } from './views'
 
 type Route = { kind: 'home' } | { kind: 'workspace'; name: string } | { kind: 'item'; id: string; page: number } | { kind: 'apps' } | { kind: 'other'; label: string }
+type HeaderMenu = null | 'launcher' | 'notifications' | 'settings' | 'download' | 'help' | 'account' | 'more' | 'switch' | 'search'
 
 export default function PowerBI({ win, params }: AppProps) {
   const { setUrl, setTitle } = useWin()
+  const { isAgent, open: openApp } = useDesk()
+  const [hmenu, setHmenu] = useState<HeaderMenu>(null)
+  const [dialog, setDialog] = useState<null | 'newWorkspace' | 'feedback' | { settings: string }>(null)
+  const [search, setSearch] = useState('')
+  const [seenNotes, setSeenNotes] = useState(false)
   const items = useCollection('powerbi.reports')
   const workspaces = useCollection('powerbi.workspaces')
   const [route, setRoute] = useState<Route>({ kind: 'home' })
@@ -80,6 +87,11 @@ export default function PowerBI({ win, params }: AppProps) {
         return id
       },
       dismiss: (id: string) => setNotices((l) => l.filter((x) => x.id !== id)),
+      navigate: (v: string) => {
+        setWsFlyout(false)
+        setRoute(v === 'apps' ? { kind: 'apps' } : v === 'home' ? { kind: 'home' } : { kind: 'other', label: v })
+      },
+      itemSettings: (id: string) => setDialog({ settings: id }),
     }),
     [openItem],
   )
@@ -113,6 +125,9 @@ export default function PowerBI({ win, params }: AppProps) {
     } else if (route.kind === 'apps') {
       setUrl('https://app.powerbi.com/groups/me/apps?experience=power-bi')
       setTitle('Apps - Power BI')
+    } else if (route.kind === 'other') {
+      setUrl(`https://app.powerbi.com/${route.label}?experience=power-bi`)
+      setTitle(`${route.label[0].toUpperCase()}${route.label.slice(1)} - Power BI`)
     } else {
       setUrl('https://app.powerbi.com/home?experience=power-bi')
       setTitle('Home - Power BI')
@@ -123,17 +138,41 @@ export default function PowerBI({ win, params }: AppProps) {
   const crumbs: string[] =
     route.kind === 'item' && curItem ? [curItem.workspace, curItem.name] : route.kind === 'workspace' ? [route.name] : route.kind === 'apps' ? ['Apps'] : []
 
+  const go = (label: string) => () => {
+    setWsFlyout(false)
+    setRoute({ kind: 'other', label })
+  }
+  const isOther = (l: string) => route.kind === 'other' && route.label === l
   const nav: [string, string, any, any, () => void, boolean][] = [
     ['home', 'Home', Home24Regular, Home24Filled, () => setRoute({ kind: 'home' }), route.kind === 'home'],
-    ['create', 'Create', Add24Regular, Add24Regular, () => setRoute({ kind: 'other', label: 'Create' }), route.kind === 'other' && route.label === 'Create'],
-    ['browse', 'Browse', Folder24Regular, Folder24Filled, () => setRoute({ kind: 'home' }), false],
-    ['onelake', 'OneLake', Database24Regular, Database24Regular, () => setRoute({ kind: 'home' }), false],
+    ['create', 'Create', Add24Regular, Add24Regular, go('create'), isOther('create')],
+    ['browse', 'Browse', Folder24Regular, Folder24Filled, go('browse'), isOther('browse')],
+    ['onelake', 'OneLake', Database24Regular, Database24Regular, go('onelake'), isOther('onelake')],
     ['workspaces', 'Workspaces', Album24Regular, Album24Filled, () => setWsFlyout((v) => !v), wsFlyout],
     ['apps', 'Apps', Apps24Regular, Apps24Filled, () => setRoute({ kind: 'apps' }), route.kind === 'apps'],
-    ['metrics', 'Metrics', Trophy24Regular, Trophy24Regular, () => setRoute({ kind: 'home' }), false],
-    ['monitor', 'Monitor', Desktop24Regular, Desktop24Regular, () => setRoute({ kind: 'home' }), false],
-    ['learn', 'Learn', BookOpen24Regular, BookOpen24Regular, () => setRoute({ kind: 'home' }), false],
+    ['metrics', 'Metrics', Trophy24Regular, Trophy24Regular, go('metrics'), isOther('metrics')],
+    ['monitor', 'Monitor', Desktop24Regular, Desktop24Regular, go('monitor'), isOther('monitor')],
+    ['learn', 'Learn', BookOpen24Regular, BookOpen24Regular, go('learn'), isOther('learn')],
   ]
+
+  // notification centre: failed refreshes, shares and exports derived from the data
+  const feed = items
+    .flatMap((r) => [
+      ...(r.history ?? []).filter((h: any) => h.status === 'Failed').slice(0, 1).map((h: any) => ({ id: `${r.id}-${h.id}`, at: h.start, title: `Refresh failed: ${r.name}`, body: h.error, item: r.id, bad: true })),
+      ...(r.exports ?? []).slice(0, 1).map((e: any) => ({ id: `${r.id}-exp-${e.at}`, at: e.at, title: `Export ready: ${r.name}`, body: `${e.format} file downloaded`, item: r.id, bad: false })),
+      ...((r.sharedWith ?? []).length ? [{ id: `${r.id}-share`, at: r.lastRefreshed, title: `${r.name} is shared`, body: `With ${(r.sharedWith ?? []).length} people`, item: r.id, bad: false }] : []),
+    ])
+    .sort((a, b) => +new Date(b.at) - +new Date(a.at))
+    .slice(0, 8)
+  const unread = seenNotes ? 0 : feed.filter((f) => f.bad).length
+  const hits = search.trim() ? items.filter((r) => r.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 8) : []
+  const menuBox = 'absolute z-50 top-10 bg-white text-[#242424] rounded shadow-[0_6.4px_14.4px_rgba(0,0,0,0.13),0_1.2px_3.6px_rgba(0,0,0,0.11)] py-1 text-[13px]'
+  const mItem = (l: string, fn: () => void, sub?: string) => (
+    <button key={l} onClick={() => (fn(), setHmenu(null))} className="w-full text-left px-3 py-2 hover:bg-[#F3F2F1]">
+      <div>{l}</div>
+      {sub && <div className="text-[11.5px] text-[#605E5C]">{sub}</div>}
+    </button>
+  )
 
   const wsRec = workspaces.find((w) => w.name === currentWs)
 
@@ -142,9 +181,24 @@ export default function PowerBI({ win, params }: AppProps) {
       <div className="flex-1 min-h-0 flex flex-col bg-[#F5F5F5] text-[#242424] relative" style={{ fontFamily: 'var(--font-win)' }}>
         {/* ── header ── */}
         <div className="h-10 shrink-0 flex items-center bg-[#252423] text-white text-[13px] relative">
-          <button className="w-12 h-10 flex items-center justify-center hover:bg-white/10" aria-label="App launcher">
-            <Grid20Regular />
-          </button>
+          <div className="relative">
+            <button onClick={() => setHmenu((m) => (m === 'launcher' ? null : 'launcher'))} className={`w-12 h-10 flex items-center justify-center hover:bg-white/10 ${hmenu === 'launcher' ? 'bg-white/10' : ''}`} aria-label="App launcher">
+              <Grid20Regular />
+            </button>
+            {hmenu === 'launcher' && (
+              <div className={`${menuBox} left-1 w-[300px] p-3`} onMouseLeave={() => setHmenu(null)}>
+                <div className="text-[13px] font-semibold mb-2 px-1">Microsoft 365</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {['outlook', 'teams', 'excel', 'word', 'powerpoint', 'explorer'].map((a) => (
+                    <button key={a} onClick={() => (openApp(a), setHmenu(null))} className="flex flex-col items-center gap-1 py-2 rounded hover:bg-[#F3F2F1] text-[12px] capitalize">
+                      <img src={logoUrl(a)} className="w-7 h-7" alt="" />
+                      {a === 'explorer' ? 'OneDrive' : a === 'powerpoint' ? 'PowerPoint' : a}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           <button onClick={() => setRoute({ kind: 'home' })} className="flex items-center gap-2 pr-3 h-10 font-semibold text-[14px]" data-agent="powerbi-logo" aria-label="Power BI home">
             <img src={logoUrl('powerbi')} className="w-4 h-5" alt="" />
             Power BI
@@ -168,29 +222,126 @@ export default function PowerBI({ win, params }: AppProps) {
           <div className="absolute left-1/2 -translate-x-1/2 w-[360px] max-w-[30%]">
             <div className="h-7 rounded bg-white flex items-center gap-2 px-2 text-[#605E5C]">
               <Search16Regular />
-              <input data-agent="powerbi-search" aria-label="Search" placeholder="Search" className="flex-1 bg-transparent outline-none text-[13px] text-[#242424] placeholder:text-[#605E5C]" />
+              <input
+                data-agent="powerbi-search"
+                aria-label="Search"
+                placeholder="Search"
+                value={search}
+                onChange={(e) => (setSearch(e.target.value), setHmenu('search'))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && hits[0]) {
+                    openItem(hits[0].id)
+                    setSearch('')
+                    setHmenu(null)
+                  }
+                  if (e.key === 'Escape') (setSearch(''), setHmenu(null))
+                }}
+                className="flex-1 bg-transparent outline-none text-[13px] text-[#242424] placeholder:text-[#605E5C]"
+              />
             </div>
+            {hmenu === 'search' && search.trim() && (
+              <div className={`${menuBox} top-8 left-0 right-0`} onMouseLeave={() => setHmenu(null)}>
+                {hits.map((r) => (
+                  <button key={r.id} onClick={() => (openItem(r.id), setSearch(''), setHmenu(null))} className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-[#F3F2F1] text-left">
+                    <ItemIcon type={r.type} />
+                    <span className="min-w-0">
+                      <span className="block truncate">{r.name}</span>
+                      <span className="block text-[11.5px] text-[#605E5C]">
+                        {TYPE_LABEL[r.type]} · {r.workspace}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {!hits.length && <div className="px-3 py-2 text-[#605E5C]">No results for “{search.trim()}”</div>}
+              </div>
+            )}
           </div>
           <div className="ml-auto flex items-center h-10">
             <div className="flex flex-col leading-[13px] text-[11px] mr-2 text-white/90 px-2">
               <span>Fabric capacity:</span>
               <span className="font-semibold">F64 · North Central US</span>
             </div>
-            {[
-              [Alert20Regular, 'Notifications', true],
-              [Settings20Regular, 'Settings', false],
-              [ArrowDownload20Regular, 'Download', false],
-              [QuestionCircle20Regular, 'Help & support', false],
-              [PersonFeedback20Regular, 'Feedback', false],
-            ].map(([I, l, badge]: any) => (
-              <button key={l} aria-label={l} title={l} className="relative w-10 h-10 flex items-center justify-center hover:bg-white/10">
-                <I />
-                {badge && <span className="absolute top-1.5 right-2 min-w-[14px] h-[14px] rounded-full bg-[#C50F1F] text-[9px] font-semibold flex items-center justify-center px-0.5">2</span>}
-              </button>
+            {(
+              [
+                [Alert20Regular, 'Notifications', 'notifications'],
+                [Settings20Regular, 'Settings', 'settings'],
+                [ArrowDownload20Regular, 'Download', 'download'],
+                [QuestionCircle20Regular, 'Help & support', 'help'],
+                [PersonFeedback20Regular, 'Feedback', null],
+              ] as [any, string, HeaderMenu][]
+            ).map(([I, l, m]) => (
+              <div key={l} className="relative">
+                <button
+                  aria-label={l}
+                  title={l}
+                  onClick={() => {
+                    if (!m) return setDialog('feedback')
+                    if (m === 'notifications') setSeenNotes(true)
+                    setHmenu((x) => (x === m ? null : m))
+                  }}
+                  className={`relative w-10 h-10 flex items-center justify-center hover:bg-white/10 ${hmenu === m && m ? 'bg-white/10' : ''}`}
+                >
+                  <I />
+                  {m === 'notifications' && unread > 0 && <span className="absolute top-1.5 right-2 min-w-[14px] h-[14px] rounded-full bg-[#C50F1F] text-[9px] font-semibold flex items-center justify-center px-0.5">{unread}</span>}
+                </button>
+                {hmenu === 'notifications' && m === 'notifications' && (
+                  <div className={`${menuBox} right-0 w-[360px] py-0`} data-agent="powerbi-notification-center" onMouseLeave={() => setHmenu(null)}>
+                    <div className="px-4 py-3 text-[15px] font-semibold border-b border-[#EDEBE9]">Notifications</div>
+                    <div className="max-h-[360px] overflow-auto">
+                      {feed.map((f) => (
+                        <button key={f.id} onClick={() => (openItem(f.item), setHmenu(null))} className="w-full text-left px-4 py-2.5 border-b border-[#F3F2F1] hover:bg-[#F3F2F1]">
+                          <div className={`text-[13px] font-semibold ${f.bad ? 'text-[#A4262C]' : ''}`}>{f.title}</div>
+                          {f.body && <div className="text-[12px] text-[#605E5C] line-clamp-2">{f.body}</div>}
+                          <div className="text-[11px] text-[#A19F9D] mt-0.5">{fmtDT(f.at)}</div>
+                        </button>
+                      ))}
+                      {!feed.length && <div className="px-4 py-6 text-center text-[#605E5C]">You’re all caught up.</div>}
+                    </div>
+                  </div>
+                )}
+                {hmenu === 'settings' && m === 'settings' && (
+                  <div className={`${menuBox} right-0 w-[280px]`} onMouseLeave={() => setHmenu(null)}>
+                    {mItem('Manage connections and gateways', () => setRoute({ kind: 'other', label: 'monitor' }), 'NW-GW-BOS-01 (on-premises) · Offline')}
+                    {mItem('Manage personal storage', () => ctx.notify({ kind: 'info', title: 'Personal storage', body: `${items.filter((r) => r.workspace === 'My workspace').length} items · 1.2 GB of 10 GB used` }))}
+                    {mItem('Admin portal', () => ctx.notify({ kind: 'info', title: 'Admin portal', body: 'You need the Fabric administrator role to open the admin portal.' }))}
+                    {mItem('General settings', () => ctx.notify({ kind: 'info', title: 'Settings', body: 'Language: English (United States) · Time zone: Eastern Time' }))}
+                  </div>
+                )}
+                {hmenu === 'download' && m === 'download' && (
+                  <div className={`${menuBox} right-0 w-[260px]`} onMouseLeave={() => setHmenu(null)}>
+                    {['Power BI Desktop', 'Data Gateway', 'Paginated Report Builder', 'Power BI for mobile', 'Analyze in Excel updates'].map((l) => mItem(l, () => ctx.notify({ kind: 'success', title: 'Download started', body: l })))}
+                  </div>
+                )}
+                {hmenu === 'help' && m === 'help' && (
+                  <div className={`${menuBox} right-0 w-[240px]`} onMouseLeave={() => setHmenu(null)}>
+                    {mItem('Learn', () => setRoute({ kind: 'other', label: 'learn' }))}
+                    {mItem('Documentation', () => setRoute({ kind: 'other', label: 'learn' }))}
+                    {mItem('Community', () => ctx.notify({ kind: 'info', title: 'Community', body: 'community.fabric.microsoft.com opened in a new tab.' }))}
+                    {mItem('About Power BI', () => ctx.notify({ kind: 'info', title: 'About Power BI', body: 'Version 13.0.25000 · Fabric capacity F64 · North Central US' }))}
+                  </div>
+                )}
+              </div>
             ))}
-            <button className="w-10 h-10 flex items-center justify-center hover:bg-white/10 mr-1" aria-label="Account manager for Alex Morgan">
-              <Avatar id={ME.id} size={28} />
-            </button>
+            <div className="relative">
+              <button onClick={() => setHmenu((x) => (x === 'account' ? null : 'account'))} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 mr-1" aria-label="Account manager for Alex Morgan">
+                <Avatar id={ME.id} size={28} />
+              </button>
+              {hmenu === 'account' && (
+                <div className={`${menuBox} right-1 w-[280px] p-4`} onMouseLeave={() => setHmenu(null)}>
+                  <div className="flex items-center gap-3">
+                    <Avatar id={ME.id} size={44} />
+                    <div>
+                      <div className="font-semibold">{ME.name}</div>
+                      <div className="text-[12px] text-[#605E5C]">{ME.email}</div>
+                      <div className="text-[12px] text-[#605E5C]">Power BI Pro · Northwind Global</div>
+                    </div>
+                  </div>
+                  <button onClick={() => (setRoute({ kind: 'workspace', name: 'My workspace' }), setCurrentWs('My workspace'), setHmenu(null))} className="mt-3 text-[13px] text-[#0F6CBD] hover:underline">
+                    Open My workspace
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -238,14 +389,44 @@ export default function PowerBI({ win, params }: AppProps) {
                 </button>
               )
             })}
-            <button className="w-[58px] h-8 rounded flex items-center justify-center hover:bg-[#F3F2F1] text-[#424242]" aria-label="More">
-              <MoreHorizontal20Regular />
-            </button>
-            <div className="mt-auto mb-2 flex flex-col items-center">
-              <button className="w-[58px] py-1.5 rounded flex flex-col items-center gap-1 text-[10px] hover:bg-[#F3F2F1]" aria-label="Switch experience">
+            <div className="relative">
+              <button onClick={() => setHmenu((x) => (x === 'more' ? null : 'more'))} className="w-[58px] h-8 rounded flex items-center justify-center hover:bg-[#F3F2F1] text-[#424242]" aria-label="More">
+                <MoreHorizontal20Regular />
+              </button>
+              {hmenu === 'more' && (
+                <div className={`${menuBox} left-[60px] top-0 w-[240px]`} onMouseLeave={() => setHmenu(null)}>
+                  <div className="px-3 py-1 text-[11.5px] font-semibold text-[#605E5C]">Recent</div>
+                  {[...items]
+                    .filter((r) => r.lastOpened)
+                    .sort((a, b) => +new Date(b.lastOpened) - +new Date(a.lastOpened))
+                    .slice(0, 6)
+                    .map((r) => (
+                      <button key={r.id} onClick={() => (openItem(r.id), setHmenu(null))} className="w-full flex items-center gap-2 px-3 h-9 hover:bg-[#F3F2F1] text-left">
+                        <ItemIcon type={r.type} size={16} />
+                        <span className="truncate">{r.name}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+            <div className="mt-auto mb-2 flex flex-col items-center relative">
+              <button onClick={() => setHmenu((x) => (x === 'switch' ? null : 'switch'))} className="w-[58px] py-1.5 rounded flex flex-col items-center gap-1 text-[10px] hover:bg-[#F3F2F1]" aria-label="Switch experience">
                 <img src={logoUrl('powerbi')} className="w-6 h-7" alt="" />
                 <span>Power BI</span>
               </button>
+              {hmenu === 'switch' && (
+                <div className={`${menuBox} left-[60px] top-auto bottom-0 w-[240px]`} onMouseLeave={() => setHmenu(null)}>
+                  <div className="px-3 py-1 text-[11.5px] font-semibold text-[#605E5C]">Experiences</div>
+                  <div className="px-3 h-9 flex items-center gap-2 font-semibold">
+                    <img src={logoUrl('powerbi')} className="w-4 h-5" alt="" /> Power BI ✓
+                  </div>
+                  {['Data Factory', 'Data Engineering', 'Real-Time Intelligence'].map((l) => (
+                    <div key={l} className="px-3 h-9 flex items-center text-[#A19F9D]" title="Not included in your Fabric license">
+                      {l}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -290,7 +471,7 @@ export default function PowerBI({ win, params }: AppProps) {
                     ))}
                 </div>
                 <div className="p-4 border-t border-[#EDEBE9]">
-                  <button className="h-8 px-3 rounded bg-[#117865] text-white text-[13px] font-semibold flex items-center gap-1.5">
+                  <button data-agent="powerbi-new-workspace" onClick={() => (setDialog('newWorkspace'), setWsFlyout(false))} className="h-8 px-3 rounded bg-[#117865] text-white text-[13px] font-semibold flex items-center gap-1.5">
                     <Add16Regular /> New workspace
                   </button>
                 </div>
@@ -301,8 +482,23 @@ export default function PowerBI({ win, params }: AppProps) {
           {/* ── main ── */}
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">
             {route.kind === 'home' && <HomeView />}
-            {route.kind === 'other' && <HomeView />}
-            {route.kind === 'apps' && <AppsView />}
+            {route.kind === 'other' &&
+              (route.label === 'create' ? (
+                <CreateView isAgent={isAgent} />
+              ) : route.label === 'browse' ? (
+                <BrowseView />
+              ) : route.label === 'onelake' ? (
+                <OneLakeView />
+              ) : route.label === 'metrics' ? (
+                <MetricsView />
+              ) : route.label === 'monitor' ? (
+                <MonitorView />
+              ) : route.label === 'learn' ? (
+                <LearnView onOpen={(t) => ctx.notify({ kind: 'info', title: 'Microsoft Learn', body: `“${t}” opened in a new tab.` })} />
+              ) : (
+                <HomeView />
+              ))}
+            {route.kind === 'apps' && <AppsView onOpen={(ws) => ctx.openWorkspace(ws)} />}
             {route.kind === 'workspace' && <WorkspaceView name={route.name} />}
             {route.kind === 'item' && curItem?.type === 'report' && (
               <ReportView key={curItem.id} rec={curItem} page={route.page} nonce={win.nonce} onPage={(p) => setRoute({ kind: 'item', id: curItem.id, page: p })} />
@@ -311,6 +507,19 @@ export default function PowerBI({ win, params }: AppProps) {
             {route.kind === 'item' && (curItem?.type === 'semanticModel' || curItem?.type === 'dataflow') && <ModelView key={curItem.id} rec={curItem} />}
           </div>
         </div>
+
+        {dialog === 'newWorkspace' && (
+          <NewWorkspaceDialog
+            onClose={() => setDialog(null)}
+            onCreated={(n) => {
+              setDialog(null)
+              ctx.openWorkspace(n)
+              ctx.notify({ kind: 'success', title: 'Workspace created', body: n })
+            }}
+          />
+        )}
+        {dialog === 'feedback' && <FeedbackDialog onClose={() => setDialog(null)} onDone={() => ctx.notify({ kind: 'success', title: 'Thank you for your feedback' })} />}
+        {dialog && typeof dialog === 'object' && items.find((r) => r.id === dialog.settings) && <ItemSettingsDialog rec={items.find((r) => r.id === dialog.settings)} onClose={() => setDialog(null)} />}
 
         {/* notifications */}
         <div className="absolute right-3 top-[48px] z-50 flex flex-col gap-2 w-[340px] pointer-events-none">
@@ -338,7 +547,7 @@ export default function PowerBI({ win, params }: AppProps) {
   )
 }
 
-function AppsView() {
+function AppsView({ onOpen }: { onOpen: (ws: string) => void }) {
   const apps = [
     ['Operations Hub', 'Operations Analytics', '#118DFF', 'Priya Raman'],
     ['Finance Insights', 'Finance', '#12239E', 'Sofia Martinez'],
@@ -350,7 +559,7 @@ function AppsView() {
       <div className="text-[20px] font-semibold mb-4">Apps</div>
       <div className="grid grid-cols-4 gap-4 max-w-[1000px]">
         {apps.map(([n, ws, c, o]) => (
-          <div key={n} className="border border-[#E1DFDD] rounded-md overflow-hidden hover:shadow-md">
+          <button key={n} data-agent={`powerbi-app-${n.toLowerCase().replace(/\s+/g, '-')}`} onClick={() => db.get('powerbi.workspaces').some((w) => w.name === ws) && onOpen(ws)} className="text-left border border-[#E1DFDD] rounded-md overflow-hidden hover:shadow-md">
             <div className="h-24 flex items-center justify-center" style={{ background: c }}>
               <span className="text-white text-[28px] font-semibold">{n[0]}</span>
             </div>
@@ -358,7 +567,7 @@ function AppsView() {
               <div className="text-[14px] font-semibold">{n}</div>
               <div className="text-[12px] text-[#605E5C]">{ws} · {o}</div>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </div>

@@ -1,6 +1,19 @@
-import type { ReactNode } from 'react'
-import { MoreHorizontal16Regular, Filter12Regular, ArrowExpand16Regular, Pin16Regular } from '@fluentui/react-icons'
+import { createContext, useContext, useState, type ReactNode } from 'react'
+import { MoreHorizontal16Regular, Filter12Regular, ArrowExpand16Regular, Pin16Regular, ArrowMinimize16Regular } from '@fluentui/react-icons'
 import { THEME, fmtN } from './shared'
+
+/** Report-level hooks for visual header actions (focus mode, pin, export…). Optional: visuals work without it. */
+export interface VisualCtxT {
+  focused: string | null
+  spotlight: string | null
+  setFocused: (id: string | null) => void
+  setSpotlight: (id: string | null) => void
+  onPin?: (title: string) => void
+  onExport?: (title: string) => void
+  /** short description of the filters affecting visuals */
+  filterSummary?: string
+}
+export const VisualCtx = createContext<VisualCtxT | null>(null)
 
 export const AXIS = { fontSize: 11, fill: '#605E5C', fontFamily: 'Segoe UI, sans-serif' }
 export const GRID = '#E9E9E9'
@@ -29,18 +42,55 @@ export function Visual({
   agent?: string
   bare?: boolean
 }) {
+  const vc = useContext(VisualCtx)
+  const [more, setMore] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
+  const id = agent ?? title ?? `${x},${y}`
+  const focused = vc?.focused === id
+  const dimmed = !!vc && ((vc.focused && !focused) || (vc.spotlight && vc.spotlight !== id))
+  // focus mode: scale this visual up to fill the page (charts keep their own pixel sizes)
+  const fs = focused ? Math.min((1280 - 32) / w, (720 - 72) / h) : 1
+  const ib = 'w-5 h-5 flex items-center justify-center rounded hover:bg-[#F3F2F1]'
   return (
     <div
       data-agent={agent}
       className={`absolute group ${bare ? '' : 'bg-white rounded-[6px] shadow-[0_0_0_1px_#E6E6E6]'}`}
-      style={{ left: x, top: y, width: w, height: h }}
+      style={{ left: focused ? 16 : x, top: focused ? 56 : y, width: w, height: h, transform: focused ? `scale(${fs})` : undefined, transformOrigin: '0 0', zIndex: focused ? 30 : more ? 25 : undefined, opacity: dimmed ? (vc?.focused ? 0 : 0.25) : 1, pointerEvents: dimmed && vc?.focused ? 'none' : undefined, transition: 'opacity .2s' }}
     >
       {!bare && (
-        <div className="absolute -top-[22px] right-0 hidden group-hover:flex items-center gap-0.5 bg-white rounded-t px-1 h-[22px] text-[#605E5C] shadow-[0_-1px_2px_rgba(0,0,0,0.08)] z-10">
-          <Pin16Regular className="w-3.5 h-3.5" />
-          <Filter12Regular />
-          <ArrowExpand16Regular className="w-3.5 h-3.5" />
-          <MoreHorizontal16Regular />
+        <div className={`absolute -top-[22px] right-0 ${more || showFilters ? 'flex' : 'hidden group-hover:flex'} items-center gap-0.5 bg-white rounded-t px-1 h-[22px] text-[#605E5C] shadow-[0_-1px_2px_rgba(0,0,0,0.08)] z-10`}>
+          <button className={ib} aria-label="Pin visual" title="Pin visual" onClick={() => title && vc?.onPin?.(title)}>
+            <Pin16Regular className="w-3.5 h-3.5" />
+          </button>
+          <button className={ib} aria-label="Filters and slicers affecting this visual" title="Filters and slicers affecting this visual" onClick={() => setShowFilters((v) => !v)}>
+            <Filter12Regular />
+          </button>
+          <button className={ib} aria-label={focused ? 'Back to report' : 'Focus mode'} title={focused ? 'Back to report' : 'Focus mode'} onClick={() => vc?.setFocused(focused ? null : id)}>
+            {focused ? <ArrowMinimize16Regular className="w-3.5 h-3.5" /> : <ArrowExpand16Regular className="w-3.5 h-3.5" />}
+          </button>
+          <button className={ib} aria-label="More options" title="More options" onClick={() => setMore((m) => !m)}>
+            <MoreHorizontal16Regular />
+          </button>
+          {showFilters && (
+            <div className="absolute right-0 top-[22px] w-[220px] bg-white rounded shadow-[0_6px_14px_rgba(0,0,0,0.16)] p-2.5 text-[11.5px] text-[#252423]" onMouseLeave={() => setShowFilters(false)}>
+              <div className="font-semibold mb-1">Filters and slicers affecting this visual</div>
+              <div className="text-[#605E5C]">{vc?.filterSummary || 'No filters applied'}</div>
+            </div>
+          )}
+          {more && (
+            <div className="absolute right-0 top-[22px] w-[180px] bg-white rounded shadow-[0_6px_14px_rgba(0,0,0,0.16)] py-1 text-[12.5px] text-[#252423]" onMouseLeave={() => setMore(false)}>
+              {[
+                ['Export data', () => title && vc?.onExport?.(title)],
+                [vc?.spotlight === id ? 'Remove spotlight' : 'Spotlight', () => vc?.setSpotlight(vc.spotlight === id ? null : id)],
+                [focused ? 'Back to report' : 'Focus mode', () => vc?.setFocused(focused ? null : id)],
+                ['Pin visual', () => title && vc?.onPin?.(title)],
+              ].map(([l, fn]: any) => (
+                <button key={l} onClick={() => (fn(), setMore(false))} className="w-full text-left h-8 px-3 hover:bg-[#F3F2F1]">
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       <div className={`w-full h-full flex flex-col ${bare ? '' : 'px-3 pt-2 pb-1.5'} transition-opacity ${loading ? 'opacity-30' : ''}`}>
@@ -259,7 +309,7 @@ function scaleColor(v: number, s: { min: number; max: number; reverse?: boolean 
   return `rgba(${c[0]},${c[1]},${c[2]},0.55)`
 }
 
-export function Matrix({ cols, rows, total }: { cols: Col[]; rows: any[]; total?: any }) {
+export function Matrix({ cols, rows, total, onRow, selected }: { cols: Col[]; rows: any[]; total?: any; onRow?: (row: any) => void; selected?: (row: any) => boolean }) {
   return (
     <div className="absolute inset-0 overflow-auto">
       <table className="w-full text-[11.5px] border-collapse" style={{ fontFamily: 'Segoe UI, sans-serif' }}>
@@ -274,7 +324,12 @@ export function Matrix({ cols, rows, total }: { cols: Col[]; rows: any[]; total?
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className={`border-b border-[#EDEBE9] ${i % 2 ? 'bg-[#FAFAFA]' : ''}`}>
+            <tr
+              key={i}
+              onClick={onRow ? () => onRow(r) : undefined}
+              className={`border-b border-[#EDEBE9] ${i % 2 ? 'bg-[#FAFAFA]' : ''} ${onRow ? 'cursor-pointer hover:bg-[#EBF3FC]' : ''}`}
+              style={selected?.(r) ? { background: '#DEECF9', fontWeight: 600 } : undefined}
+            >
               {cols.map((c) => (
                 <Cell key={c.key} c={c} r={r} />
               ))}

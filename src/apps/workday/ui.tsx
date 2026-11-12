@@ -106,3 +106,62 @@ export function AppIcon({ icon, color, size = 40 }: { icon: ReactNode; color: st
     </span>
   )
 }
+
+/** Workday-style modal dialog (rendered inside the app's relative root). */
+export function Modal({ title, children, footer, onClose, width = 640, agent }: { title: ReactNode; children: ReactNode; footer?: ReactNode; onClose: () => void; width?: number; agent?: string }) {
+  return (
+    <div className="absolute inset-0 z-40 bg-black/30 flex items-start justify-center pt-10" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div data-agent={agent} className="max-h-[calc(100%-60px)] flex flex-col bg-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.3)]" style={{ width }}>
+        <div className="flex items-center justify-between px-7 pt-6 pb-2">
+          <h2 className="text-[22px] font-bold">{title}</h2>
+          <button onClick={onClose} aria-label="Close dialog" className="w-9 h-9 rounded-full hover:bg-[#F0F1F2] flex items-center justify-center text-[20px] leading-none text-[#5E6A75]">
+            ×
+          </button>
+        </div>
+        <div className="px-7 pt-2 pb-4 overflow-auto min-h-0 text-[14px]">{children}</div>
+        {footer && <div className="flex items-center gap-3 px-7 py-5 border-t border-[#E8EBED]">{footer}</div>}
+      </div>
+    </div>
+  )
+}
+
+export function Success({ children, onClose }: { children: ReactNode; onClose?: () => void }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-[#EAF7EE] border border-[#CDEBD5] px-5 py-3 text-[14px] text-[#1E6F34] font-medium">
+      <span className="w-5 h-5 rounded-full bg-[#319C4C] text-white flex items-center justify-center text-[12px] shrink-0">✓</span>
+      <span className="flex-1">{children}</span>
+      {onClose && (
+        <button onClick={onClose} aria-label="Dismiss message" className="text-[#1E6F34] text-[18px] leading-none px-1">
+          ×
+        </button>
+      )}
+    </div>
+  )
+}
+
+export const textareaCls = 'w-full h-24 px-3 py-2 rounded-md border border-[#A1AAB3] outline-none focus:border-[#0875E1] text-[14px] resize-none'
+
+/** Small dropdown menu anchored under a button. */
+export function Menu({ items, onClose, className = '' }: { items: { label: string; onClick: () => void; danger?: boolean; agent?: string }[]; onClose: () => void; className?: string }) {
+  return (
+    <>
+      <div className="fixed inset-0 z-30" onMouseDown={onClose} />
+      <div className={`absolute z-40 min-w-[230px] bg-white rounded-xl border border-[#E8EBED] shadow-[0_8px_28px_rgba(0,0,0,0.18)] py-2 ${className}`}>
+        {items.map((it) => (
+          <button
+            key={it.label}
+            role="menuitem"
+            data-agent={it.agent}
+            onClick={() => {
+              onClose()
+              it.onClick()
+            }}
+            className={`w-full text-left px-4 h-9 text-[14px] hover:bg-[#F6F7F8] ${it.danger ? 'text-[#DE2E21]' : 'text-[#333]'}`}
+          >
+            {it.label}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}

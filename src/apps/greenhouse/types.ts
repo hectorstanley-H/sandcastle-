@@ -42,6 +42,11 @@ export interface Job extends Rec {
   /** interviews per stage */
   plan: Partial<Record<Stage, PlanInterview[]>>
   hiringTeam: string[]
+  /** job board post status (defaults to live for open jobs) */
+  postStatus?: 'live' | 'offline'
+  /** followed / starred by the current user (defaults to "I'm the hiring manager") */
+  starred?: boolean
+  description?: string
 }
 
 export interface Scorecard {
@@ -94,7 +99,18 @@ export interface Candidate extends Rec {
   experience: { title: string; company: string; years: string }[]
   education: string
   linkedin: string
-  offer?: { salary: string; startDate: string; status: 'draft' | 'pending_approval' | 'approved' | 'accepted'; approvers: string[] }
+  offer?: {
+    salary: string
+    startDate: string
+    status: 'draft' | 'pending_approval' | 'approved' | 'sent' | 'accepted' | 'declined'
+    approvers: string[]
+    /** approvers who have signed off (in order) */
+    approvedBy?: string[]
+    bonus?: string
+    equity?: string
+    sentAt?: string
+    createdAt?: string
+  }
   updatedBy?: string
 }
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { X, Upload, LayoutTemplate, Trash2, Plus, ChevronDown, PenLine, Calendar, User, Type, CheckSquare, Mail, Building2, BadgeCheck, CaseSensitive, ArrowLeft, FileText, MoreVertical, GripVertical, Search } from 'lucide-react'
 import { db, useCollection } from '@/db/db'
+import { Menu, useToast } from './ui'
+import type { Envelope } from './shared'
 import { useDesk } from '@/os/context'
 import { ME } from '@/data/people'
 import type { Nav } from './index'
@@ -39,15 +41,24 @@ const ROLE_OPTS = [
   ['viewer', 'Needs to View'],
 ]
 
-export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav: Nav; setUrl: (u: string) => void }) {
+const UPLOAD_FILES: [string, number][] = [
+  ['Northwind_Consulting_Agreement.pdf', 6],
+  ['Contoso_Pilot_Order_Form.pdf', 3],
+  ['Equipment_Lease_Agreement.pdf', 5],
+  ['Northwind_Mutual_NDA_v4.pdf', 3],
+  ['Vendor_Onboarding_Form.pdf', 5],
+]
+
+export function SendFlow({ templateId, envelopeId, self, nav, setUrl }: { templateId?: string; envelopeId?: string; self?: boolean; nav: Nav; setUrl: (u: string) => void }) {
   const { isAgent } = useDesk()
+  const toast = useToast()
   const templates = useCollection<Template>('docusign.templates')
   const [step, setStep] = useState<'setup' | 'fields'>('setup')
   const [tplId, setTplId] = useState<string | undefined>(templateId)
   const [picker, setPicker] = useState(false)
   const [pick, setPick] = useState<string | undefined>()
   const [q, setQ] = useState('')
-  const [rcps, setRcps] = useState<Rcp[]>([{ name: '', email: '', role: 'signer' }])
+  const [rcps, setRcps] = useState<Rcp[]>(self ? [{ name: ME.name, email: ME.email, role: 'signer' }] : [{ name: '', email: '', role: 'signer' }])
   const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
   const [order, setOrder] = useState(false)
@@ -55,26 +66,37 @@ export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav
   const [activeR, setActiveR] = useState(0)
   const [placed, setPlaced] = useState<Placed[]>([])
   const [err, setErr] = useState('')
-  const [draftId] = useState(() => guidFor(Math.floor(Math.random() * 1e6) + 1000))
+  const [draftId] = useState(() => envelopeId ?? guidFor(Math.floor(Math.random() * 1e6) + 1000))
+  const [docs, setDocs] = useState<{ name: string; pages: number }[]>([])
+  const [fieldQ, setFieldQ] = useState('')
   const tpl = templates.find((t) => t.id === tplId)
 
   const applyTemplate = (id: string) => {
     const t = templates.find((x) => x.id === id)
     if (!t) return
     setTplId(id)
+    setDocs(t.documents)
     setSubject(t.subject)
     setMessage(t.message)
     const named = t.roles.filter((r) => r.name || r.email).map((r) => ({ name: r.name, email: r.email, role: r.role }))
     setRcps(t.roles[0] && !t.roles[0].name ? [{ name: '', email: '', role: t.roles[0].role ?? 'signer' }, ...named] : named.length ? named : [{ name: '', email: '', role: 'signer' }])
   }
   useEffect(() => {
-    if (templateId) applyTemplate(templateId)
+    const draft = envelopeId ? db.find<Envelope>('docusign.envelopes', envelopeId) : undefined
+    if (draft) {
+      setTplId(draft.templateId)
+      setDocs(draft.documents)
+      setSubject(draft.subject)
+      setMessage(draft.message)
+      setOrder(draft.recipients.some((r) => r.order > 1))
+      setRcps(draft.recipients.length ? draft.recipients.map((r) => ({ name: r.name, email: r.email, role: r.role })) : [{ name: '', email: '', role: 'signer' }])
+    } else if (templateId) applyTemplate(templateId)
   }, [])
   useEffect(() => {
     setUrl(`https://apps.docusign.com/send/prepare/${draftId.toLowerCase()}/${step === 'setup' ? 'add-recipients' : 'add-fields'}`)
   }, [step])
 
-  const doc = tpl?.documents[0]
+  const doc = docs[0]
   const setR = (i: number, patch: Partial<Rcp>) => setRcps((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
 
   const next = () => {
@@ -84,16 +106,44 @@ export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav
     setStep('fields')
   }
 
+  const existing = () => db.find<Envelope>('docusign.envelopes', draftId)
+
+  const saveDraft = () => {
+    if (!doc) return nav.go({ page: 'home' })
+    const now = new Date().toISOString()
+    const prev = existing()
+    const rec = {
+      id: draftId,
+      subject: subject || `Complete with Docusign: ${doc.name}`,
+      message,
+      status: 'draft',
+      templateId: tplId,
+      documents: docs,
+      recipients: rcps.filter((r) => r.name || r.email).map((r, i) => ({ name: r.name, email: r.email, role: r.role, status: 'created', order: order ? i + 1 : 1 })),
+      sender: ME.email,
+      senderName: ME.name,
+      createdAt: prev?.createdAt ?? now,
+      lastChange: now,
+      fields: placed.map((p, i) => ({ id: p.id, type: p.type, page: 1, x: 80 + i * 10, y: 700, recipient: p.recipient })),
+      history: [...(prev?.history ?? []), { at: now, action: prev ? 'Saved' : 'Created', by: ME.name, detail: prev ? 'Draft saved' : 'Envelope created and saved as draft' }],
+    }
+    if (prev) db.update('docusign.envelopes', draftId, rec)
+    else db.insert('docusign.envelopes', rec, { prepend: true })
+    toast('Draft saved', rec.subject)
+    nav.go({ page: 'agreements', folder: 'drafts' })
+  }
+
   const send = () => {
     const now = new Date().toISOString()
     const list = rcps.filter((r) => r.name && r.email)
+    const prev = existing()
     const env = {
       id: draftId,
       subject: subject || `Complete with Docusign: ${doc?.name}`,
       message,
-      status: 'sent',
+      status: self ? 'action' : 'sent',
       templateId: tplId,
-      documents: tpl?.documents ?? [],
+      documents: tpl && !prev ? tpl.documents : docs,
       recipients: list.map((r, i) => ({ name: r.name, email: r.email, role: r.role, status: 'sent', order: order ? i + 1 : 1, at: now })),
       sender: ME.email,
       senderName: ME.name,
@@ -103,15 +153,17 @@ export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav
       expiresAt: new Date(Date.now() + 120 * 864e5).toISOString(),
       fields: placed.map((p, i) => ({ id: p.id, type: p.type, page: 1, x: 80 + i * 10, y: 700, recipient: p.recipient })),
       history: [
-        { at: now, action: 'Created', by: ME.name, detail: `Envelope created from template “${tpl?.name}”${isAgent ? ' (via H-Worker)' : ''}` },
+        ...(prev?.history ?? [{ at: now, action: 'Created', by: ME.name, detail: `Envelope created${tpl ? ` from template “${tpl.name}”` : ''}${isAgent ? ' (via H-Worker)' : ''}` }]),
         { at: now, action: 'Sent', by: ME.name, detail: `Envelope sent to ${list.filter((r) => r.role !== 'cc').map((r) => `${r.name} [${r.email}]`).join(', ')}` },
         ...list.filter((r) => r.role === 'cc').map((r) => ({ at: now, action: 'Copy Sent', by: ME.name, detail: `Carbon copy sent to ${r.name} [${r.email}]` })),
       ],
       createdBy: isAgent ? 'hworker' : undefined,
     }
-    db.insert('docusign.envelopes', env, { prepend: true })
+    if (prev) db.update('docusign.envelopes', draftId, { ...env, createdAt: prev.createdAt, deleted: false })
+    else db.insert('docusign.envelopes', env, { prepend: true })
     if (tpl) db.update('docusign.templates', tpl.id, (t) => ({ uses: (t.uses ?? 0) + 1 }))
-    nav.go({ page: 'details', id: draftId, justSent: true })
+    if (self) nav.go({ page: 'sign', id: draftId })
+    else nav.go({ page: 'details', id: draftId, justSent: true })
   }
 
   const place = (slot: string) => {
@@ -182,12 +234,20 @@ export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav
           <Btn onClick={() => setStep('setup')}>
             <ArrowLeft size={16} /> Back
           </Btn>
-          <Btn kind="primary" data-agent="docusign-send" aria-label="Send" onClick={send} className="px-6">
-            Send
-          </Btn>
+          {self ? (
+            <Btn kind="primary" data-agent="docusign-self-sign" onClick={send} className="px-6">
+              Sign
+            </Btn>
+          ) : (
+            <Btn kind="primary" data-agent="docusign-send" aria-label="Send" onClick={send} className="px-6">
+              Send
+            </Btn>
+          )}
         </>
       ) : (
-        <Btn>Save and Close</Btn>
+        <Btn data-agent="docusign-save-close" onClick={saveDraft}>
+          Save and Close
+        </Btn>
       )}
     </div>
   )
@@ -212,11 +272,12 @@ export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav
                 ))}
             </div>
             <div className="p-3">
-              <div className="flex items-center gap-2 h-9 px-2 rounded border border-[#CBC4D6] text-[13px] text-[#8B8698] mb-3">
-                <Search size={15} /> Search fields
+              <div className="flex items-center gap-2 h-9 px-2 rounded border border-[#CBC4D6] text-[13px] mb-3 focus-within:border-[#4C00FF]">
+                <Search size={15} className="text-[#8B8698]" />
+                <input value={fieldQ} onChange={(e) => setFieldQ(e.target.value)} placeholder="Search fields" aria-label="Search fields" className="flex-1 min-w-0 outline-none bg-transparent placeholder:text-[#8B8698]" />
               </div>
               <div className="text-[11px] font-bold text-[#5E5873] uppercase tracking-wide mb-1.5">Standard Fields</div>
-              {PALETTE.map(([k, l, I]) => (
+              {PALETTE.filter(([, l]) => !fieldQ || l.toLowerCase().includes(fieldQ.toLowerCase())).map(([k, l, I]) => (
                 <button
                   key={k}
                   data-agent={`docusign-field-${k}`}
@@ -283,21 +344,46 @@ export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav
                 <div className="flex-1">
                   <div className="text-[14px] font-semibold">{doc.name}</div>
                   <div className="text-[13px] text-[#5E5873] mt-0.5">
-                    {doc.pages} pages · from template “{tpl?.name}”
+                    {doc.pages} pages{tpl ? ` · from template “${tpl.name}”` : ' · uploaded'}
                   </div>
                 </div>
-                <button aria-label="Document options" className="w-8 h-8 rounded hover:bg-[#F2F0F5] flex items-center justify-center">
-                  <MoreVertical size={18} />
-                </button>
+                <Menu
+                  width={200}
+                  items={[
+                    { label: 'Replace with template', icon: LayoutTemplate, onClick: () => setPicker(true) },
+                    {
+                      label: 'Remove',
+                      icon: Trash2,
+                      danger: true,
+                      onClick: () => {
+                        setDocs([])
+                        setTplId(undefined)
+                        setPlaced([])
+                      },
+                    },
+                  ]}
+                  trigger={(t) => (
+                    <button onClick={t} aria-label="Document options" className="w-8 h-8 rounded hover:bg-[#F2F0F5] flex items-center justify-center">
+                      <MoreVertical size={18} />
+                    </button>
+                  )}
+                />
               </div>
             ) : (
               <div className="h-[170px] rounded border-2 border-dashed border-[#CBC4D6] flex flex-col items-center justify-center gap-3 bg-[#FBFAFD]">
                 <Upload size={28} className="text-[#5E5873]" />
                 <div className="text-[14px] text-[#5E5873]">Drop your files here or</div>
                 <div className="flex gap-2">
-                  <Btn kind="primary">
-                    Upload <ChevronDown size={16} />
-                  </Btn>
+                  <Menu
+                    align="left"
+                    width={300}
+                    items={[{ header: 'Documents on this PC' }, ...UPLOAD_FILES.map(([n, pg]) => ({ label: n, icon: FileText, onClick: () => setDocs([{ name: n, pages: pg }]) }))]}
+                    trigger={(t) => (
+                      <Btn kind="primary" data-agent="docusign-upload" onClick={t}>
+                        Upload <ChevronDown size={16} />
+                      </Btn>
+                    )}
+                  />
                   <Btn data-agent="docusign-use-template" aria-label="Use a Template" onClick={() => setPicker(true)}>
                     <LayoutTemplate size={16} /> Use a Template
                   </Btn>
@@ -390,7 +476,7 @@ export function SendFlow({ templateId, nav, setUrl }: { templateId?: string; nav
             </div>
             <div className="flex-1 overflow-auto">
               {templates
-                .filter((t) => t.name.toLowerCase().includes(q.toLowerCase()))
+                .filter((t) => !t.deleted && t.name.toLowerCase().includes(q.toLowerCase()))
                 .map((t) => (
                   <button key={t.id} data-agent={`docusign-template-${t.id}`} aria-label={t.name} onClick={() => setPick(t.id)} className={`w-full flex items-center gap-4 px-6 py-3 border-b border-[#F0EDF4] text-left ${pick === t.id ? 'bg-[#F2EDFF]' : 'hover:bg-[#F7F6FA]'}`}>
                     <input type="radio" readOnly checked={pick === t.id} className="accent-[#4C00FF] w-4 h-4" />
